@@ -73,6 +73,8 @@ func (epp *EigenPodProofs) GetWithdrawalProofParams(latestOracleBeaconSlot, with
 		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_MAINNET
 	} else if epp.chainID == 17000 {
 		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_HOLESKY
+	} else if epp.chainID == 31337 {
+		FIRST_CAPELLA_SLOT = 0
 	}
 	// index of the historical summary in the array of historical_summaries
 	targetBlockRootsGroupSummaryIndex := (withdrawalSlot - FIRST_CAPELLA_SLOT) / beacon.SlotsPerHistoricalRoot
@@ -318,6 +320,8 @@ func (epp *EigenPodProofs) proveWithdrawal(
 		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_MAINNET
 	} else if epp.chainID == 17000 {
 		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_HOLESKY
+	} else if epp.chainID == 31337 {
+		FIRST_CAPELLA_SLOT = 0
 	}
 
 	withdrawalSlotUint64 := uint64(withdrawalBlockHeader.Slot)
