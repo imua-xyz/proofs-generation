@@ -117,6 +117,9 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 		StateRootProof:          commonutils.ConvertBytesToStrings(stateRootProof.StateRootProof.ToBytesSlice()),
 		ValidatorContainer:      commonutils.GetValidatorFields(versionedState.Deneb.Validators[req.ValidatorIndex]),
 		ValidatorContainerProof: commonutils.ConvertBytesToStrings(validatorContainerProof.ToBytesSlice()),
+		Slot:                    req.Slot,
+		ValidatorIndex:          req.ValidatorIndex,
+		Timestamp:               versionedState.Deneb.LatestExecutionPayloadHeader.Timestamp,
 	}, nil
 }
 

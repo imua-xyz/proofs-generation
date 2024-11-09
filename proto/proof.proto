@@ -16,6 +16,9 @@ message ValidatorProofResponse {
     repeated string state_root_proof = 2;
     repeated string validator_container = 3;
     repeated string validator_container_proof = 4;
+    uint64 slot = 5;
+    uint64 validator_index = 6;
+    uint64 timestamp = 7;
 }
 
 message WithdrawalProofRequest {
