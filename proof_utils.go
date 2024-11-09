@@ -263,9 +263,6 @@ func ProveValidatorFields(epp *EigenPodProofs, oracleBlockHeader *phase0.BeaconB
 
 	// Get beacon state root. TODO: Combine this cheaply with compute beacon state top level roots
 	stateRootProof.BeaconStateRoot = oracleBlockHeader.StateRoot
-	if err != nil {
-		return nil, nil, err
-	}
 
 	stateRootProof.StateRootProof, err = beacon.ProveStateRootAgainstBlockHeader(oracleBlockHeader)
 
