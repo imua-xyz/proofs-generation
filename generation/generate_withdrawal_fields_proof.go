@@ -18,6 +18,7 @@ import (
 )
 
 func GenerateWithdrawalFieldsProof(
+	specFile,
 	oracleBlockHeaderFile,
 	stateFile,
 	historicalSummaryStateFile,
@@ -42,6 +43,7 @@ func GenerateWithdrawalFieldsProof(
 
 	oracleBeaconBlockHeader, err := commonutils.ExtractBlockHeader(oracleBlockHeaderFile)
 
+	// not a dynamic structure, so we can use fastssz
 	root, _ := oracleBeaconBlockHeader.HashTreeRoot()
 	fmt.Println("oracleBeaconBlockHeader: ", root)
 
@@ -49,6 +51,14 @@ func GenerateWithdrawalFieldsProof(
 		log.Debug().AnErr("Error with parsing header file", err)
 		return err
 	}
+
+	fmt.Println("start parsing spec")
+	spec, err := commonutils.ParseSpecJSONFile(specFile)
+	if err != nil {
+		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with parsing spec file", err)
+		return err
+	}
+	fmt.Println("end parsing spec")
 
 	fmt.Println("start parsing state")
 	stateJSON, err := commonutils.ParseDenebStateJSONFile(stateFile)
@@ -93,8 +103,15 @@ func GenerateWithdrawalFieldsProof(
 
 	beaconBlockHeaderToVerifyIndex := blockHeaderIndex
 
+	epp, err := eigenpodproofs.NewEigenPodProofs(chainID, 1000)
+	if err != nil {
+		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error creating EPP object", err)
+		return err
+	}
+	epp = epp.WithNetworkSpec(spec)
+
 	// validatorIndex := phase0.ValidatorIndex(index)
-	beaconStateRoot, err := state.HashTreeRoot()
+	beaconStateRoot, err := epp.HashTreeRoot(state)
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with HashTreeRoot of state", err)
 		return err
@@ -108,22 +125,18 @@ func GenerateWithdrawalFieldsProof(
 	hh.PutUint64(uint64(timestamp))
 	timestampRoot := common.ConvertTo32ByteArray(hh.Hash())
 
+	// not a dynamic structure, so we can use fastssz
 	blockHeaderRoot, err := withdrawalBlockHeader.HashTreeRoot()
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with HashTreeRoot of blockHeader", err)
 		return err
 	}
-	executionPayloadRoot, err := withdrawalBlock.Body.ExecutionPayload.HashTreeRoot()
+	executionPayloadRoot, err := epp.HashTreeRoot(withdrawalBlock.Body.ExecutionPayload)
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with HashTreeRoot of executionPayload", err)
 		return err
 	}
 
-	epp, err := eigenpodproofs.NewEigenPodProofs(chainID, 1000)
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error creating EPP object", err)
-		return err
-	}
 	versionedState, err = beacon.CreateVersionedState(&state)
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with CreateVersionedState", err)

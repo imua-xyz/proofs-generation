@@ -82,17 +82,28 @@ func main() {
 		outputFile := args[11]
 		advanceSlotOfWithdrawal, err := strconv.ParseBool(args[12])
 		isCapella, err := strconv.ParseBool(args[13])
+		specFile := args[14]
 		if err != nil {
 			fmt.Println("Error:", err)
 			return
 		}
 		if isCapella {
 			fmt.Print("CAPELLA")
-			GenerateWithdrawalFieldsProofCapella(validatorIndex, historicalSummariesIndex, blockHeaderIndex, oracleBlockHeaderFile, stateFile, historicalSummaryStateFile, headerFile, bodyFile, outputFile, modifyStateToIncludeFullWithdrawal, partialWithdrawalProof, advanceSlotOfWithdrawal)
+			GenerateWithdrawalFieldsProofCapella(
+				validatorIndex, historicalSummariesIndex, blockHeaderIndex, oracleBlockHeaderFile,
+				stateFile, historicalSummaryStateFile, headerFile, bodyFile,
+				outputFile, modifyStateToIncludeFullWithdrawal, partialWithdrawalProof, advanceSlotOfWithdrawal,
+				specFile,
+			)
 		} else {
 			fmt.Print("DENEB")
 
-			GenerateWithdrawalFieldsProof(validatorIndex, historicalSummariesIndex, blockHeaderIndex, oracleBlockHeaderFile, stateFile, historicalSummaryStateFile, headerFile, bodyFile, outputFile, modifyStateToIncludeFullWithdrawal, partialWithdrawalProof, advanceSlotOfWithdrawal)
+			GenerateWithdrawalFieldsProof(
+				validatorIndex, historicalSummariesIndex, blockHeaderIndex, oracleBlockHeaderFile,
+				stateFile, historicalSummaryStateFile, headerFile, bodyFile,
+				outputFile, modifyStateToIncludeFullWithdrawal, partialWithdrawalProof, advanceSlotOfWithdrawal,
+				specFile,
+			)
 		}
 	//use this for withdrawal credentials and balance update proofs
 	case "ValidatorFieldsProof":
@@ -112,23 +123,35 @@ func main() {
 		oracleStateFile := args[3]
 		stateFile := args[4]
 		outputFile := args[5]
+		// intentionally keep spec as the last one to keep the order of the arguments consistent
+		// even though the spec is the most important one
+		specFile := args[6]
 
-		GenerateValidatorFieldsProof(oracleStateFile, stateFile, index, changeBalance, uint64(newBalance), outputFile)
+		GenerateValidatorFieldsProof(oracleStateFile, stateFile, index, changeBalance, uint64(newBalance), outputFile, specFile)
 	default:
 		fmt.Println("Unknown command:", args[0])
 		os.Exit(0)
 	}
 }
 
-func GenerateValidatorFieldsProof(oracleBlockHeaderFile string, stateFile string, index uint64, changeBalance bool, newBalance uint64, output string) error {
+func GenerateValidatorFieldsProof(
+	oracleBlockHeaderFile string, stateFile string, index uint64,
+	changeBalance bool, newBalance uint64, output string,
+	specFile string,
+) error {
+	networkSpec := make(map[string]any) // init it as an empty map
 	var state deneb.BeaconState
 	var oracleBeaconBlockHeader phase0.BeaconBlockHeader
-	SetupValidatorProof(oracleBlockHeaderFile, stateFile, index, changeBalance, newBalance, 0, &state, &oracleBeaconBlockHeader)
+	dynSSZ := SetupValidatorProof(
+		oracleBlockHeaderFile, stateFile, index, changeBalance, newBalance, 0, &state, &oracleBeaconBlockHeader,
+		specFile, networkSpec,
+	)
 
 	validatorIndex := phase0.ValidatorIndex(index)
 
-	beaconStateRoot, _ := state.HashTreeRoot()
+	beaconStateRoot, _ := dynSSZ.HashTreeRoot(state)
 
+	// not a dynamic structure, so we can use fastssz
 	latestBlockHeaderRoot, err := oracleBeaconBlockHeader.HashTreeRoot()
 	if err != nil {
 		fmt.Println("Error with HashTreeRoot of latestBlockHeader", err)
@@ -140,6 +163,7 @@ func GenerateValidatorFieldsProof(oracleBlockHeaderFile string, stateFile string
 		fmt.Println("Error creating EPP object", err)
 		return err
 	}
+	epp = epp.WithNetworkSpec(networkSpec)
 
 	var versionedState spec.VersionedBeaconState
 	versionedState.Deneb = &state
@@ -166,8 +190,15 @@ func GenerateValidatorFieldsProof(oracleBlockHeaderFile string, stateFile string
 	return nil
 }
 
-func GenerateWithdrawalFieldsProof(index, historicalSummariesIndex, blockHeaderIndex uint64, oracleBlockHeaderFile, stateFile, historicalSummaryStateFile, headerFile, bodyFile, outputFile string, modifyStateToIncludeFullWithdrawal bool, partialWithdrawalProof bool, advanceSlotOfWithdrawal bool) error {
+func GenerateWithdrawalFieldsProof(
+	index, historicalSummariesIndex, blockHeaderIndex uint64,
+	oracleBlockHeaderFile, stateFile, historicalSummaryStateFile,
+	headerFile, bodyFile, outputFile string, modifyStateToIncludeFullWithdrawal bool,
+	partialWithdrawalProof bool, advanceSlotOfWithdrawal bool,
+	specFile string,
+) error {
 
+	networkSpec := make(map[string]any) // init it as an empty map
 	//this is the oracle provided state
 	var oracleBeaconBlockHeader phase0.BeaconBlockHeader
 	//this is the state with the withdrawal in it
@@ -177,8 +208,14 @@ func GenerateWithdrawalFieldsProof(index, historicalSummariesIndex, blockHeaderI
 	var withdrawalBlock deneb.BeaconBlock
 
 	withdrawalToModifyIndex := uint64(0)
-	SetUpWithdrawalsProof(oracleBlockHeaderFile, stateFile, historicalSummaryStateFile, headerFile, bodyFile, &oracleBeaconBlockHeader, &oracleState, &historicalSummaryState, &withdrawalBlockHeader, &withdrawalBlock, modifyStateToIncludeFullWithdrawal, partialWithdrawalProof, index, historicalSummariesIndex, withdrawalToModifyIndex, advanceSlotOfWithdrawal)
-	root, _ := withdrawalBlock.Body.HashTreeRoot()
+	_, dynSSZ := SetUpWithdrawalsProof(
+		oracleBlockHeaderFile, stateFile, historicalSummaryStateFile, headerFile,
+		bodyFile, &oracleBeaconBlockHeader, &oracleState, &historicalSummaryState,
+		&withdrawalBlockHeader, &withdrawalBlock, modifyStateToIncludeFullWithdrawal,
+		partialWithdrawalProof, index, historicalSummariesIndex, withdrawalToModifyIndex,
+		advanceSlotOfWithdrawal, specFile, networkSpec,
+	)
+	root, _ := dynSSZ.HashTreeRoot(withdrawalBlock.Body)
 	fmt.Println("blockBody.hashtreeroot()", hex.EncodeToString(root[:]))
 	fmt.Println("blockheader.bodyroot)", hex.EncodeToString(withdrawalBlockHeader.BodyRoot[:]))
 	hh := ssz.NewHasher()
@@ -198,7 +235,7 @@ func GenerateWithdrawalFieldsProof(index, historicalSummariesIndex, blockHeaderI
 	}
 
 	validatorIndex := phase0.ValidatorIndex(index)
-	beaconStateRoot, err := oracleState.HashTreeRoot()
+	beaconStateRoot, err := dynSSZ.HashTreeRoot(oracleState)
 	if err != nil {
 		fmt.Println("Error with HashTreeRoot of oracleState", err)
 		return err
@@ -210,6 +247,7 @@ func GenerateWithdrawalFieldsProof(index, historicalSummariesIndex, blockHeaderI
 	hh.PutUint64(uint64(slot))
 	slotRoot := eigenpodproofs.ConvertTo32ByteArray(hh.Hash())
 
+	// not a dynamic structure, so we can use fastssz
 	latestBlockHeaderRoot, err := oracleBeaconBlockHeader.HashTreeRoot()
 	if err != nil {
 		fmt.Println("Error with HashTreeRoot of latestBlockHeader", err)
@@ -220,15 +258,17 @@ func GenerateWithdrawalFieldsProof(index, historicalSummariesIndex, blockHeaderI
 	hh.PutUint64(uint64(timestamp))
 	timestampRoot := eigenpodproofs.ConvertTo32ByteArray(hh.Hash())
 
+	// not a dynamic structure, so we can use fastssz
 	blockHeaderRoot, _ := withdrawalBlockHeader.HashTreeRoot()
-	blockBodyRoot, _ := withdrawalBlock.Body.HashTreeRoot()
-	executionPayloadRoot, _ := withdrawalBlock.Body.ExecutionPayload.HashTreeRoot()
+	blockBodyRoot, _ := dynSSZ.HashTreeRoot(withdrawalBlock.Body)
+	executionPayloadRoot, _ := dynSSZ.HashTreeRoot(withdrawalBlock.Body.ExecutionPayload)
 
 	epp, err := eigenpodproofs.NewEigenPodProofs(GOERLI_CHAIN_ID, 1000)
 	if err != nil {
 		fmt.Println("Error creating EPP object", err)
 		return err
 	}
+	epp = epp.WithNetworkSpec(networkSpec)
 	oracleBeaconStateTopLevelRoots, err := epp.ComputeBeaconStateTopLevelRoots(&versionedOracleState)
 	if err != nil {
 		fmt.Println("Error computing beacon state top level roots", err)
@@ -285,7 +325,13 @@ func GenerateWithdrawalFieldsProof(index, historicalSummariesIndex, blockHeaderI
 	return nil
 }
 
-func GenerateWithdrawalFieldsProofCapella(index, historicalSummariesIndex, blockHeaderIndex uint64, oracleBlockHeaderFile, stateFile, historicalSummaryStateFile, headerFile, bodyFile, outputFile string, modifyStateToIncludeFullWithdrawal bool, partialWithdrawalProof bool, advanceSlotOfWithdrawal bool) error {
+func GenerateWithdrawalFieldsProofCapella(
+	index, historicalSummariesIndex, blockHeaderIndex uint64,
+	oracleBlockHeaderFile, stateFile, historicalSummaryStateFile,
+	headerFile, bodyFile, outputFile string,
+	modifyStateToIncludeFullWithdrawal bool, partialWithdrawalProof bool,
+	advanceSlotOfWithdrawal bool, specFile string,
+) error {
 
 	//this is the oracle provided state
 	var oracleBeaconBlockHeader phase0.BeaconBlockHeader
@@ -295,10 +341,19 @@ func GenerateWithdrawalFieldsProofCapella(index, historicalSummariesIndex, block
 	var withdrawalBlockHeader phase0.BeaconBlockHeader
 	var withdrawalBlock capella.BeaconBlock
 
+	networkSpec := make(map[string]any) // init it as an empty map
+
 	withdrawalToModifyIndex := uint64(0)
 	fmt.Println("hustoricalsummary state file", historicalSummaryStateFile)
-	SetUpWithdrawalsProofCapella(oracleBlockHeaderFile, stateFile, historicalSummaryStateFile, headerFile, bodyFile, &oracleBeaconBlockHeader, &oracleState, &historicalSummaryState, &withdrawalBlockHeader, &withdrawalBlock, modifyStateToIncludeFullWithdrawal, partialWithdrawalProof, index, historicalSummariesIndex, withdrawalToModifyIndex, advanceSlotOfWithdrawal)
-	root, _ := withdrawalBlock.Body.HashTreeRoot()
+	_, dynSSZ := SetUpWithdrawalsProofCapella(
+		oracleBlockHeaderFile, stateFile, historicalSummaryStateFile,
+		headerFile, bodyFile, &oracleBeaconBlockHeader,
+		&oracleState, &historicalSummaryState, &withdrawalBlockHeader,
+		&withdrawalBlock, modifyStateToIncludeFullWithdrawal, partialWithdrawalProof,
+		index, historicalSummariesIndex, withdrawalToModifyIndex,
+		advanceSlotOfWithdrawal, specFile, networkSpec,
+	)
+	root, _ := dynSSZ.HashTreeRoot(withdrawalBlock.Body)
 	fmt.Println("blockBody.hashtreeroot()", hex.EncodeToString(root[:]))
 	fmt.Println("blockheader.bodyroot)", hex.EncodeToString(withdrawalBlockHeader.BodyRoot[:]))
 	hh := ssz.NewHasher()
@@ -317,7 +372,7 @@ func GenerateWithdrawalFieldsProofCapella(index, historicalSummariesIndex, block
 	}
 
 	validatorIndex := phase0.ValidatorIndex(index)
-	beaconStateRoot, _ := oracleState.HashTreeRoot()
+	beaconStateRoot, _ := dynSSZ.HashTreeRoot(oracleState)
 
 	fmt.Println("beaconStateRoot", hex.EncodeToString(beaconStateRoot[:]))
 
@@ -325,6 +380,7 @@ func GenerateWithdrawalFieldsProofCapella(index, historicalSummariesIndex, block
 	hh.PutUint64(uint64(slot))
 	slotRoot := eigenpodproofs.ConvertTo32ByteArray(hh.Hash())
 
+	// not a dynamic structure, so we can use fastssz
 	latestBlockHeaderRoot, err := oracleBeaconBlockHeader.HashTreeRoot()
 	if err != nil {
 		fmt.Println("Error with HashTreeRoot of latestBlockHeader", err)
@@ -335,16 +391,22 @@ func GenerateWithdrawalFieldsProofCapella(index, historicalSummariesIndex, block
 	hh.PutUint64(uint64(timestamp))
 	timestampRoot := eigenpodproofs.ConvertTo32ByteArray(hh.Hash())
 
+	// not a dynamic structure, so we can use fastssz
 	blockHeaderRoot, _ := withdrawalBlockHeader.HashTreeRoot()
-	blockBodyRoot, _ := withdrawalBlock.Body.HashTreeRoot()
-	executionPayloadRoot, _ := withdrawalBlock.Body.ExecutionPayload.HashTreeRoot()
+	blockBodyRoot, _ := dynSSZ.HashTreeRoot(withdrawalBlock.Body)
+	executionPayloadRoot, _ := dynSSZ.HashTreeRoot(withdrawalBlock.Body.ExecutionPayload)
 
 	epp, err := eigenpodproofs.NewEigenPodProofs(GOERLI_CHAIN_ID, 1000)
 	if err != nil {
 		fmt.Println("Error creating EPP object", err)
 		return err
 	}
+	epp = epp.WithNetworkSpec(networkSpec)
 	oracleBeaconStateTopLevelRoots, err := epp.ComputeBeaconStateTopLevelRoots(&versionedOracleState)
+	if err != nil {
+		fmt.Println("Error computing beacon state top level roots", err)
+		return err
+	}
 	//blockHeaderProof, slotProof, withdrawalProof, validatorProof, timestampProof, executionPayloadProof, stateRootAgainstLatestBlockHeaderProof, historicalSummaryProof, err :=
 	// withdrawalProof, stateRootProof, validatorProof, err := epp.ProveWithdrawal(&oracleBeaconBlockHeader, &oracleState, historicalSummaryState.BlockRoots, &withdrawalBlock, validatorIndex)
 	withdrawalProof, _, err := epp.ProveWithdrawal(&oracleBeaconBlockHeader, &versionedOracleState, oracleBeaconStateTopLevelRoots, historicalSummaryState.BlockRoots, &versionedWithdrawalBlock, uint64(validatorIndex))

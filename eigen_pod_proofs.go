@@ -11,6 +11,8 @@ import (
 
 	beacon "github.com/Layr-Labs/eigenpod-proofs-generation/beacon"
 	"github.com/Layr-Labs/eigenpod-proofs-generation/common"
+	fastssz "github.com/ferranbt/fastssz"
+	dynssz "github.com/pk910/dynamic-ssz"
 )
 
 const (
@@ -26,6 +28,9 @@ type EigenPodProofs struct {
 	oracleStateTopLevelRootsCache *expirable.LRU[uint64, *beacon.BeaconStateTopLevelRoots]
 	oracleStateValidatorTreeCache *expirable.LRU[uint64, [][]phase0.Root]
 	oracleStateCacheExpirySeconds int
+	networkSpec                   map[string]any
+	hashRooter                    func(source any) ([32]byte, error)
+	dynSSZ                        *dynssz.DynSsz
 }
 
 func NewEigenPodProofs(chainID uint64, oracleStateCacheExpirySeconds int) (*EigenPodProofs, error) {
@@ -43,6 +48,13 @@ func NewEigenPodProofs(chainID uint64, oracleStateCacheExpirySeconds int) (*Eige
 		oracleStateTopLevelRootsCache: oracleStateTopLevelRootsCache,
 		oracleStateValidatorTreeCache: oracleStateValidatorTreeCache,
 		oracleStateCacheExpirySeconds: oracleStateCacheExpirySeconds,
+		// default hasher, if a spec is not provided.
+		hashRooter: func(source any) ([32]byte, error) {
+			if hashable, ok := source.(fastssz.HashRoot); ok {
+				return hashable.HashTreeRoot()
+			}
+			return phase0.Root{}, errors.New("object does not support hashing")
+		},
 	}, nil
 }
 
@@ -50,7 +62,7 @@ func (epp *EigenPodProofs) ComputeBeaconStateRoot(beaconState *deneb.BeaconState
 	beaconStateRoot, err := epp.loadOrComputeBeaconStateRoot(
 		beaconState.Slot,
 		func() (phase0.Root, error) {
-			stateRoot, err := beaconState.HashTreeRoot()
+			stateRoot, err := epp.hashRooter(beaconState)
 			if err != nil {
 				return phase0.Root{}, err
 			}
@@ -90,9 +102,9 @@ func (epp *EigenPodProofs) ComputeBeaconStateTopLevelRoots(beaconState *spec.Ver
 func (epp *EigenPodProofs) ComputeVersionedBeaconStateTopLevelRoots(beaconState *spec.VersionedBeaconState) (*beacon.BeaconStateTopLevelRoots, error) {
 	switch beaconState.Version {
 	case spec.DataVersionDeneb:
-		return beacon.ComputeBeaconStateTopLevelRootsDeneb(beaconState.Deneb)
+		return beacon.ComputeBeaconStateTopLevelRootsDeneb(beaconState.Deneb, epp.networkSpec, epp.dynSSZ)
 	case spec.DataVersionCapella:
-		return beacon.ComputeBeaconStateTopLevelRootsCapella(beaconState.Capella)
+		return beacon.ComputeBeaconStateTopLevelRootsCapella(beaconState.Capella, epp.networkSpec)
 	default:
 		return nil, errors.New("unsupported beacon state version")
 	}
@@ -174,4 +186,17 @@ func (epp *EigenPodProofs) loadOrComputeValidatorTree(slot phase0.Slot, getData 
 	// cache the beacon state root
 	epp.oracleStateValidatorTreeCache.Add(uint64(slot), validatorTree)
 	return validatorTree, nil
+}
+
+func (epp *EigenPodProofs) WithNetworkSpec(networkSpec map[string]interface{}) *EigenPodProofs {
+	epp.networkSpec = networkSpec
+	epp.dynSSZ = dynssz.NewDynSsz(networkSpec)
+	epp.hashRooter = func(source any) ([32]byte, error) {
+		return epp.dynSSZ.HashTreeRoot(source)
+	}
+	return epp
+}
+
+func (epp *EigenPodProofs) HashTreeRoot(source any) ([32]byte, error) {
+	return epp.hashRooter(source)
 }

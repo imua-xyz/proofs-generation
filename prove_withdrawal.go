@@ -182,7 +182,23 @@ func (epp *EigenPodProofs) ProveWithdrawal(
 	start := time.Now()
 	// compute the withdrawal body root
 
-	blockBodyRoot, err := withdrawalBlock.BodyRoot()
+	var blockBodyRoot phase0.Root
+	var err error
+
+	switch withdrawalBlock.Version {
+	case spec.DataVersionDeneb:
+		if withdrawalBlock.Deneb == nil || withdrawalBlock.Deneb.Message == nil || withdrawalBlock.Deneb.Message.Body == nil {
+			return nil, nil, errors.New("no deneb block")
+		}
+		blockBodyRoot, err = epp.dynSSZ.HashTreeRoot(withdrawalBlock.Deneb.Message.Body)
+	case spec.DataVersionCapella:
+		if withdrawalBlock.Capella == nil || withdrawalBlock.Capella.Message == nil || withdrawalBlock.Capella.Message.Body == nil {
+			return nil, nil, errors.New("no capella block")
+		}
+		blockBodyRoot, err = epp.dynSSZ.HashTreeRoot(withdrawalBlock.Capella.Message.Body)
+	default:
+		return nil, nil, errors.New("unsupported version")
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -216,7 +232,6 @@ func (epp *EigenPodProofs) ProveWithdrawal(
 	// initialize the withdrawal proof
 	withdrawalProof := &WithdrawalProof{}
 
-	start = time.Now()
 	var withdrawalExecutionPayloadFieldRoots []phase0.Root
 	var withdrawals []*capella.Withdrawal
 	var withdrawalFields []Bytes32
@@ -225,7 +240,9 @@ func (epp *EigenPodProofs) ProveWithdrawal(
 	if withdrawalBlock.Version == spec.DataVersionDeneb {
 		start = time.Now()
 		// prove the execution payload against the withdrawal block header
-		withdrawalProof.ExecutionPayloadProof, withdrawalProof.ExecutionPayloadRoot, err = beacon.ProveExecutionPayloadAgainstBlockHeaderDeneb(withdrawalBlockHeader, withdrawalBlock.Deneb.Message.Body)
+		withdrawalProof.ExecutionPayloadProof, withdrawalProof.ExecutionPayloadRoot, err = beacon.ProveExecutionPayloadAgainstBlockHeaderDeneb(
+			withdrawalBlockHeader, withdrawalBlock.Deneb.Message.Body, epp.networkSpec, epp.dynSSZ,
+		)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -233,7 +250,9 @@ func (epp *EigenPodProofs) ProveWithdrawal(
 
 		start = time.Now()
 		// calculate execution payload field roots
-		withdrawalExecutionPayloadFieldRoots, err = beacon.ComputeExecutionPayloadFieldRootsDeneb(withdrawalBlock.Deneb.Message.Body.ExecutionPayload)
+		withdrawalExecutionPayloadFieldRoots, err = beacon.ComputeExecutionPayloadFieldRootsDeneb(
+			withdrawalBlock.Deneb.Message.Body.ExecutionPayload, epp.networkSpec,
+		)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -246,7 +265,9 @@ func (epp *EigenPodProofs) ProveWithdrawal(
 	} else if withdrawalBlock.Version == spec.DataVersionCapella {
 		start = time.Now()
 		// prove the execution payload against the withdrawal block header
-		withdrawalProof.ExecutionPayloadProof, withdrawalProof.ExecutionPayloadRoot, err = beacon.ProveExecutionPayloadAgainstBlockHeaderCapella(withdrawalBlockHeader, withdrawalBlock.Capella.Message.Body)
+		withdrawalProof.ExecutionPayloadProof, withdrawalProof.ExecutionPayloadRoot, err = beacon.ProveExecutionPayloadAgainstBlockHeaderCapella(
+			withdrawalBlockHeader, withdrawalBlock.Capella.Message.Body, epp.networkSpec, epp.dynSSZ,
+		)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -254,7 +275,9 @@ func (epp *EigenPodProofs) ProveWithdrawal(
 
 		start = time.Now()
 		// calculate execution payload field roots
-		withdrawalExecutionPayloadFieldRoots, err = beacon.ComputeExecutionPayloadFieldRootsCapella(withdrawalBlock.Capella.Message.Body.ExecutionPayload)
+		withdrawalExecutionPayloadFieldRoots, err = beacon.ComputeExecutionPayloadFieldRootsCapella(
+			withdrawalBlock.Capella.Message.Body.ExecutionPayload, epp.networkSpec,
+		)
 		if err != nil {
 			return nil, nil, err
 		}

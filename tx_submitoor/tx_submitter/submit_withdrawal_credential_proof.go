@@ -26,6 +26,8 @@ type WithdrawalCredentialProofConfig struct {
 		OracleStateFile       string `json:"ORACLE_STATE_FILE,required"`
 		OracleBlockHeaderFile string `json:"ORACLE_BLOCK_HEADER_FILE,required"`
 	}
+
+	SpecFile string `json:"SPEC_FILE,required"`
 }
 
 func (u *EigenPodProofTxSubmitter) GenerateVerifyWithdrawalCredentialsTx(
@@ -80,6 +82,13 @@ func (u *EigenPodProofTxSubmitter) SubmitVerifyWithdrawalCredentialsTx(withdrawa
 		log.Debug().AnErr("Error with parsing withdrawal proof config file", err)
 		return nil, err
 	}
+
+	networkSpec, err := commonutils.ParseSpecJSONFile(cfg.SpecFile)
+	if err != nil {
+		log.Debug().AnErr("Error with parsing spec file", err)
+		return nil, err
+	}
+	u.eigenPodProofs = u.eigenPodProofs.WithNetworkSpec(networkSpec)
 
 	oracleBeaconBlockHeader, err := commonutils.ExtractBlockHeader(cfg.BeaconStateFiles.OracleBlockHeaderFile)
 	if err != nil {

@@ -46,6 +46,7 @@ func main() {
 		log.Panic().Msgf("failed to create chain client: %s", err)
 	}
 
+	// the spec and the hash rooter are calculated during the submitter.SubmitVerifyXXX function
 	eigenPodProofs, err := eigenpodproofs.NewEigenPodProofs(cfg.ChainID, cfg.CacheExpire)
 	if err != nil {
 		log.Panic().Msgf("failed to create eigen pod proofs: %s", err)

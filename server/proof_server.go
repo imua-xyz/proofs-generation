@@ -29,6 +29,7 @@ type BeaconClient struct {
 	blockHeaderProvider eth2client.BeaconBlockHeadersProvider
 	stateProvider       eth2client.BeaconStateProvider
 	blockProvider       eth2client.SignedBeaconBlockProvider
+	specProvider        eth2client.SpecProvider
 }
 
 func NewBeaconClient(provider string) (*BeaconClient, context.CancelFunc, error) {
@@ -42,6 +43,7 @@ func NewBeaconClient(provider string) (*BeaconClient, context.CancelFunc, error)
 		// LogLevel supplies the level of logging to carry out.
 		http.WithLogLevel(zerolog.WarnLevel),
 		http.WithTimeout(15*time.Minute),
+		http.WithCustomSpecSupport(true),
 	)
 	if err != nil {
 		return nil, cancel, err
@@ -61,6 +63,12 @@ func NewBeaconClient(provider string) (*BeaconClient, context.CancelFunc, error)
 
 	if provider, isProvider := client.(eth2client.SignedBeaconBlockProvider); isProvider {
 		beaconClient.blockProvider = provider
+	} else {
+		return nil, cancel, err
+	}
+
+	if provider, isProvider := client.(eth2client.SpecProvider); isProvider {
+		beaconClient.specProvider = provider
 	} else {
 		return nil, cancel, err
 	}
@@ -88,6 +96,12 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 		return nil, err
 	}
 
+	specResponse, err := beaconClient.specProvider.Spec(ctx, &api.SpecOpts{})
+	if err != nil {
+		return nil, err
+	}
+	networkSpec := specResponse.Data
+
 	blockHeaderResponse, err := beaconClient.blockHeaderProvider.BeaconBlockHeader(ctx, &api.BeaconBlockHeaderOpts{Block: strconv.FormatUint(req.Slot, 10)})
 	if err != nil {
 		return nil, err
@@ -105,6 +119,7 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 		log.Debug().AnErr("Error creating EPP object", err)
 		return nil, err
 	}
+	epp = epp.WithNetworkSpec(networkSpec)
 
 	stateRootProof, validatorContainerProof, err := eigenpodproofs.ProveValidatorFields(epp, beaconBlockHeader, versionedState, req.ValidatorIndex)
 	if err != nil {
@@ -140,11 +155,19 @@ func (s *ProofServer) GetWithdrawalProof(ctx context.Context, req *WithdrawalPro
 	}
 	defer cancel()
 
+	specResponse, err := beaconClient.specProvider.Spec(ctx, &api.SpecOpts{})
+	if err != nil {
+		return nil, err
+	}
+	networkSpec := specResponse.Data
+
 	epp, err := eigenpodproofs.NewEigenPodProofs(s.chainId, 1000)
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error creating EPP object", err)
 		return nil, err
 	}
+	epp = epp.
+		WithNetworkSpec(networkSpec)
 
 	targetBlockRootsGroupSummaryIndex, withdrawalBlockRootIndexInGroup, completeTargetBlockRootsGroupSlot, err = epp.GetWithdrawalProofParams(req.StateSlot, req.WithdrawalSlot)
 	if err != nil {
@@ -211,7 +234,7 @@ func (s *ProofServer) GetWithdrawalProof(ctx context.Context, req *WithdrawalPro
 		return nil, err
 	}
 
-	root, err := withdrawalBlock.Root()
+	root, err := epp.HashTreeRoot(withdrawalBlock.Deneb.Message)
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with get withdrawal block root", err)
 		return nil, err

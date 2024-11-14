@@ -13,7 +13,16 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func GenerateValidatorFieldsProof(oracleBlockHeaderFile string, stateFile string, validatorIndex uint64, chainID uint64, output string) error {
+func GenerateValidatorFieldsProof(
+	specFile string, oracleBlockHeaderFile string, stateFile string,
+	validatorIndex uint64, chainID uint64, output string,
+) error {
+
+	spec, err := commonutils.ParseSpecJSONFile(specFile)
+	if err != nil {
+		log.Debug().AnErr("Error with parsing spec file", err)
+		return err
+	}
 
 	var state deneb.BeaconState
 	var oracleBeaconBlockHeader phase0.BeaconBlockHeader
@@ -30,18 +39,14 @@ func GenerateValidatorFieldsProof(oracleBlockHeaderFile string, stateFile string
 		return err
 	}
 
-	beaconStateRoot, err := state.HashTreeRoot()
-
-	if err != nil {
-		log.Debug().AnErr("Error with HashTreeRoot of state", err)
-		return err
-	}
-
 	epp, err := eigenpodproofs.NewEigenPodProofs(chainID, 1000)
 	if err != nil {
 		log.Debug().AnErr("Error creating EPP object", err)
 		return err
 	}
+	epp = epp.WithNetworkSpec(spec)
+
+	beaconStateRoot, err := epp.HashTreeRoot(state)
 
 	versionedState, err := beacon.CreateVersionedState(&state)
 	if err != nil {
