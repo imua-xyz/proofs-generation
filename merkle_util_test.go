@@ -514,10 +514,10 @@ func TestGetHistoricalSummariesBlockRootsProofProof(t *testing.T) {
 	ParseDenebBeaconStateFromJSON(*currentBeaconStateJSON, &currentBeaconState)
 	ParseDenebBeaconStateFromJSON(*oldBeaconStateJSON, &oldBeaconState)
 
-	currentBeaconStateTopLevelRoots, _ := beacon.ComputeBeaconStateTopLevelRootsDeneb(&currentBeaconState, epp.networkSpec, epp.dynSSZ)
+	currentBeaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&currentBeaconState, epp.networkSpec, epp.dynSSZ)
 
 	if err != nil {
-		fmt.Println("error")
+		fmt.Println("error", err)
 	}
 
 	historicalSummaryIndex := uint64(271) //7421951 - FIRST_CAPELLA_SLOT_GOERLI // 8192
@@ -537,7 +537,7 @@ func TestGetHistoricalSummariesBlockRootsProofProof(t *testing.T) {
 	)
 
 	if err != nil {
-		fmt.Println("error")
+		fmt.Println("error", err)
 	}
 
 	currentBeaconStateRoot, _ := currentBeaconState.HashTreeRoot()

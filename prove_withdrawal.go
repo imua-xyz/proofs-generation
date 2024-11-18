@@ -2,6 +2,7 @@ package eigenpodproofs
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -66,23 +67,18 @@ func (epp *EigenPodProofs) GetWithdrawalProofParams(latestOracleBeaconSlot, with
 		return 0, 0, 0, errors.New("oracle beacon slot does not have enough historical summaries to prove withdrawal")
 	}
 
-	var FIRST_CAPELLA_SLOT uint64
-	if epp.chainID == 5 {
-		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_GOERLI
-	} else if epp.chainID == 1 {
-		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_MAINNET
-	} else if epp.chainID == 17000 {
-		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_HOLESKY
-	} else if epp.chainID == 31337 {
-		FIRST_CAPELLA_SLOT = 0
+	firstCapellaSlot, err := epp.getFirstCapellaSlot()
+	if err != nil {
+		log.Debug().AnErr("failed to get first capella slot", err)
+		return 0, 0, 0, err
 	}
 	// index of the historical summary in the array of historical_summaries
-	targetBlockRootsGroupSummaryIndex := (withdrawalSlot - FIRST_CAPELLA_SLOT) / beacon.SlotsPerHistoricalRoot
+	targetBlockRootsGroupSummaryIndex := (withdrawalSlot - firstCapellaSlot) / beacon.SlotsPerHistoricalRoot
 
 	withdrawalBlockRootIndexInGroup := withdrawalSlot % beacon.SlotsPerHistoricalRoot
 
 	// slot of which the beacon state is retrieved for getting the block roots array containing the old block with the old withdrawal
-	completeTargetBlockRootsGroupSlot := FIRST_CAPELLA_SLOT + (targetBlockRootsGroupSummaryIndex+1)*beacon.SlotsPerHistoricalRoot
+	completeTargetBlockRootsGroupSlot := firstCapellaSlot + (targetBlockRootsGroupSummaryIndex+1)*beacon.SlotsPerHistoricalRoot
 
 	return targetBlockRootsGroupSummaryIndex, withdrawalBlockRootIndexInGroup, completeTargetBlockRootsGroupSlot, nil
 }
@@ -336,21 +332,15 @@ func (epp *EigenPodProofs) proveWithdrawal(
 
 	withdrawalProof.WithdrawalIndex = withdrawalIndex
 
-	var FIRST_CAPELLA_SLOT uint64
-	if epp.chainID == 5 {
-		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_GOERLI
-	} else if epp.chainID == 1 {
-		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_MAINNET
-	} else if epp.chainID == 17000 {
-		FIRST_CAPELLA_SLOT = FIRST_CAPELLA_SLOT_HOLESKY
-	} else if epp.chainID == 31337 {
-		FIRST_CAPELLA_SLOT = 0
+	firstCapellaSlot, err := epp.getFirstCapellaSlot()
+	if err != nil {
+		log.Debug().AnErr("failed to get first capella slot", err)
+		return err
 	}
-
 	withdrawalSlotUint64 := uint64(withdrawalBlockHeader.Slot)
 
 	// index of the historical summary in the array of historical_summaries
-	withdrawalProof.HistoricalSummaryIndex = (withdrawalSlotUint64 - FIRST_CAPELLA_SLOT) / beacon.SlotsPerHistoricalRoot
+	withdrawalProof.HistoricalSummaryIndex = (withdrawalSlotUint64 - firstCapellaSlot) / beacon.SlotsPerHistoricalRoot
 
 	// index of the block containing the target withdrawal in the block roots array
 	withdrawalProof.BlockRootIndex = withdrawalSlotUint64 % beacon.SlotsPerHistoricalRoot
@@ -364,7 +354,6 @@ func (epp *EigenPodProofs) proveWithdrawal(
 	// log the time it takes to compute each proof
 	log.Debug().Msg("computing withdrawal proof")
 
-	var err error
 	start := time.Now()
 	// prove the withdrawal against the execution payload
 	withdrawalProof.WithdrawalProof, err = beacon.ProveWithdrawalAgainstExecutionPayload(
@@ -404,4 +393,22 @@ func (epp *EigenPodProofs) proveWithdrawal(
 	log.Debug().Msgf("time to prove block root against beacon state via historical summaries: %s", time.Since(start))
 
 	return nil
+}
+
+// getFirstCapellaSlot returns the first Capella slot of the network
+// identified by its chainID.
+func (epp *EigenPodProofs) getFirstCapellaSlot() (uint64, error) {
+	switch epp.chainID {
+	case 5:
+		return FIRST_CAPELLA_SLOT_GOERLI, nil
+	case 1:
+		return FIRST_CAPELLA_SLOT_MAINNET, nil
+	case 17000:
+		return FIRST_CAPELLA_SLOT_HOLESKY, nil
+	case 31337:
+		// localnet starts post deneb
+		return 0, nil
+	default:
+		return 0, fmt.Errorf("unsupported chain ID: %d", epp.chainID)
+	}
 }

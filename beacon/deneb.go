@@ -790,7 +790,7 @@ func ComputeExecutionPayloadFieldRootsDeneb(
 		byteLen := uint64(len(executionPayloadFields.ExtraData))
 		if byteLen > maxSize {
 			retErr = ssz.ErrIncorrectListSize
-			fmt.Println(err)
+			fmt.Println(retErr)
 		}
 		hh.PutBytes(executionPayloadFields.ExtraData)
 		// the number of 32-byte chunks, rounded up.
@@ -826,7 +826,7 @@ func ComputeExecutionPayloadFieldRootsDeneb(
 		num := uint64(len(executionPayloadFields.Transactions))
 		if num > maxNumber {
 			retErr = ssz.ErrIncorrectListSize
-			fmt.Println(err)
+			fmt.Println(retErr)
 		}
 		maxSizeTransaction, err := GetMaxBytesPerTransaction(networkSpec)
 		if err != nil {
@@ -839,7 +839,7 @@ func ComputeExecutionPayloadFieldRootsDeneb(
 				byteLen := uint64(len(elem))
 				if byteLen > maxSizeTransaction {
 					retErr = ssz.ErrIncorrectListSize
-					fmt.Println(err)
+					fmt.Println(retErr)
 				}
 				hh.AppendBytes32(elem)
 				hh.MerkleizeWithMixin(elemIndx, byteLen, (maxSizeTransaction+31)/32)

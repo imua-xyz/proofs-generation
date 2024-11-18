@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"strconv"
 	"time"
 
@@ -113,6 +114,15 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 		return nil, err
 	}
 	versionedState = beaconStateResponse.Data
+	if versionedState.Deneb == nil {
+		return nil, errors.New("only post-Deneb chains are supported")
+	}
+	if req.ValidatorIndex >= uint64(len(versionedState.Deneb.Validators)) {
+		return nil, errors.New("validator index out of range")
+	}
+	if versionedState.Deneb.LatestExecutionPayloadHeader == nil {
+		return nil, errors.New("latest execution payload header not found")
+	}
 
 	epp, err := eigenpodproofs.NewEigenPodProofs(s.chainId, 1000)
 	if err != nil {

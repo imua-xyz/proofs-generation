@@ -48,7 +48,7 @@ func GenerateBalanceUpdateProof(
 	beaconStateRoot, err := epp.HashTreeRoot(state)
 
 	if err != nil {
-		log.Debug().AnErr("Error with HashTreeRoot of state", err)
+		log.Error().AnErr("Error with HashTreeRoot of state", err)
 		return err
 	}
 

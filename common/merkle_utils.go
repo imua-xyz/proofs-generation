@@ -191,9 +191,5 @@ func ValidateProof(root phase0.Root, proof [][32]byte, element phase0.Root, inde
 
 	res := target_hash == root
 
-	// fmt.Printf(
-	// 	"Validated proof root: %#x, leaf: %#x, index: %d, result: %t\n",
-	// 	root, element, index, res,
-	// )
 	return res
 }
