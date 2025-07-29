@@ -73,7 +73,7 @@ func (epp *EigenPodProofs) ProveValidatorContainers(oracleBlockHeader *phase0.Be
 	return VerifyValidatorFieldsCallParams, nil
 }
 
-func (epp *EigenPodProofs) ProveValidatorAgainstBeaconState(beaconStateTopLevelRoots *beacon.BeaconStateTopLevelRoots, oracleBeaconStateSlot phase0.Slot, oracleBeaconStateValidators []*phase0.Validator, validatorIndex uint64) (common.Proof, error) {
+func (epp *EigenPodProofs) ProveValidatorAgainstBeaconState(beaconStateTopLevelRoots *beacon.VersionedBeaconStateTopLevelRoots, oracleBeaconStateSlot phase0.Slot, oracleBeaconStateValidators []*phase0.Validator, validatorIndex uint64) (common.Proof, error) {
 	// prove the validator list against the beacon state
 	validatorListProof, err := beacon.ProveBeaconTopLevelRootAgainstBeaconState(beaconStateTopLevelRoots, beacon.ValidatorListIndex)
 	if err != nil {

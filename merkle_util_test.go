@@ -434,7 +434,7 @@ func TestProveValidatorBalanceAgainstValidatorBalanceList(t *testing.T) {
 	proof, _ := beacon.ProveValidatorBalanceAgainstValidatorBalanceList(oracleState.Balances, uint64(validatorIndex))
 
 	beaconStateTopLevelRoots, _ := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState, epp.networkSpec, epp.dynSSZ)
-	root := beaconStateTopLevelRoots.BalancesRoot
+	root := beaconStateTopLevelRoots.Deneb.BalancesRoot
 
 	balanceRootList, err := beacon.GetBalanceRoots(oracleState.Balances)
 	if err != nil {
@@ -474,7 +474,7 @@ func TestProveBeaconTopLevelRootAgainstBeaconState(t *testing.T) {
 
 	// validation of the proof
 	// get the leaf denoting the validatorsRoot in the BeaconStateRoot Merkle tree
-	leaf := beaconStateTopLevelRoots.ValidatorsRoot
+	leaf := beaconStateTopLevelRoots.Deneb.ValidatorsRoot
 	flag := epgcommon.ValidateProof(beaconStateRoot, validatorsRootProof, *leaf, beacon.ValidatorListIndex)
 	if flag != true {
 		fmt.Println("error")
@@ -641,7 +641,7 @@ func TestProveValidatorAgainstValidatorList(t *testing.T) {
 	}
 
 	// calling the proof verification func
-	flag := epgcommon.ValidateProof(*beaconStateTopLevelRoots.ValidatorsRoot, validatorProof, leaf, uint64(validatorIndex))
+	flag := epgcommon.ValidateProof(*beaconStateTopLevelRoots.Deneb.ValidatorsRoot, validatorProof, leaf, uint64(validatorIndex))
 	if flag != true {
 		fmt.Println("error")
 	}

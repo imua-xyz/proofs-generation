@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Layr-Labs/eigenpod-proofs-generation/common"
+	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/altair"
 	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
@@ -390,10 +391,12 @@ func ComputeExecutionPayloadFieldRootsCapella(
 // taken from https://github.com/attestantio/go-eth2-client/blob/654ac05b4c534d96562329f988655e49e5743ff5/spec/capella/beaconstate_ssz.go#L639
 func ComputeBeaconStateTopLevelRootsCapella(
 	b *capella.BeaconState, networkSpec map[string]any,
-) (*BeaconStateTopLevelRoots, error) {
+) (*VersionedBeaconStateTopLevelRoots, error) {
 
 	var err error
-	beaconStateTopLevelRoots := &BeaconStateTopLevelRoots{}
+
+	// deneb == capella
+	beaconStateTopLevelRoots := &BeaconStateTopLevelRootsDeneb{}
 
 	hh := ssz.NewHasher()
 
@@ -839,5 +842,8 @@ func ComputeBeaconStateTopLevelRootsCapella(
 		hh.Reset()
 	}
 
-	return beaconStateTopLevelRoots, nil
+	return &VersionedBeaconStateTopLevelRoots{
+		Deneb:   beaconStateTopLevelRoots,
+		Version: spec.DataVersionCapella,
+	}, nil
 }

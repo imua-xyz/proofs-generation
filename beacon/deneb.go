@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Layr-Labs/eigenpod-proofs-generation/common"
+	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/altair"
 	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
@@ -250,10 +251,10 @@ func ProveExecutionPayloadAgainstBlockBodyDeneb(
 // taken from https://github.com/attestantio/go-eth2-client/blob/21f7dd480fed933d8e0b1c88cee67da721c80eb2/spec/deneb/beaconstate_ssz.go#L640
 func ComputeBeaconStateTopLevelRootsDeneb(
 	b *deneb.BeaconState, networkSpec map[string]any, dynSSZ *dynssz.DynSsz,
-) (*BeaconStateTopLevelRoots, error) {
+) (*VersionedBeaconStateTopLevelRoots, error) {
 
 	var err error
-	beaconStateTopLevelRoots := &BeaconStateTopLevelRoots{}
+	beaconStateTopLevelRoots := &BeaconStateTopLevelRootsDeneb{}
 
 	hh := dynssz.NewHasher()
 
@@ -711,7 +712,10 @@ func ComputeBeaconStateTopLevelRootsDeneb(
 		hh.Reset()
 	}
 
-	return beaconStateTopLevelRoots, nil
+	return &VersionedBeaconStateTopLevelRoots{
+		Deneb:   beaconStateTopLevelRoots,
+		Version: spec.DataVersionDeneb,
+	}, nil
 }
 
 func ComputeExecutionPayloadFieldRootsDeneb(

@@ -128,7 +128,7 @@ type InputDataBlockCapella struct {
 	Finalized            bool `json:"finalized"`
 }
 
-func SetUpWithdrawalsProof(
+func SetUpWithdrawalsProofDeneb(
 	oracleBlockHeaderFile string,
 	stateFile string,
 	historicalSummaryStateFile string,
@@ -219,7 +219,7 @@ func SetUpWithdrawalsProof(
 		if err != nil {
 			fmt.Println("error in getting top level roots", err)
 		}
-		state.HistoricalSummaries[historicalSummariesIndex].BlockSummaryRoot = *historicalSummaryStateTopLevelRoots.BlockRootsRoot
+		state.HistoricalSummaries[historicalSummariesIndex].BlockSummaryRoot = *historicalSummaryStateTopLevelRoots.Deneb.BlockRootsRoot
 
 		// set the withdrawable epoch of the validator to indicate a full withdrawal
 		if !partialWithdrawalProof {
@@ -332,7 +332,7 @@ func SetUpWithdrawalsProofCapella(
 		if err != nil {
 			fmt.Println("error in getting top level roots", err)
 		}
-		state.HistoricalSummaries[historicalSummariesIndex].BlockSummaryRoot = *historicalSummaryStateTopLevelRoots.BlockRootsRoot
+		state.HistoricalSummaries[historicalSummariesIndex].BlockSummaryRoot = *historicalSummaryStateTopLevelRoots.Deneb.BlockRootsRoot
 
 		// set the withdrawable epoch of the validator to indicate a full withdrawal
 		if !partialWithdrawalProof {

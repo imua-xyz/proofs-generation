@@ -169,7 +169,7 @@ func (epp *EigenPodProofs) ProveWithdrawals(
 func (epp *EigenPodProofs) ProveWithdrawal(
 	oracleBlockHeader *phase0.BeaconBlockHeader,
 	oracleBeaconState *spec.VersionedBeaconState,
-	oracleBeaconStateTopLevelRoots *beacon.BeaconStateTopLevelRoots,
+	oracleBeaconStateTopLevelRoots *beacon.VersionedBeaconStateTopLevelRoots,
 	historicalSummaryStateBlockRoots []phase0.Root,
 	withdrawalBlock *spec.VersionedSignedBeaconBlock,
 	validatorIndex uint64,
@@ -318,7 +318,7 @@ func (epp *EigenPodProofs) proveWithdrawal(
 	withdrawalProof *WithdrawalProof,
 	oracleBlockHeader *phase0.BeaconBlockHeader,
 	oracleBeaconStateHistoricalSummaries []*capella.HistoricalSummary,
-	oracleBeaconStateTopLevelRoots *beacon.BeaconStateTopLevelRoots,
+	oracleBeaconStateTopLevelRoots *beacon.VersionedBeaconStateTopLevelRoots,
 	historicalSummaryStateBlockRoots []phase0.Root,
 	withdrawalBlockHeader *phase0.BeaconBlockHeader,
 	withdrawalExecutionPayloadFieldRoots []phase0.Root,

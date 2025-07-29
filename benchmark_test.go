@@ -34,7 +34,7 @@ func BenchmarkComputeBeaconStateTopLevelRoots(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	var cached *beacon.BeaconStateTopLevelRoots
+	var cached *beacon.VersionedBeaconStateTopLevelRoots
 	for i := 0; i < b.N; i++ {
 		cached, err = epp.ComputeBeaconStateTopLevelRoots(&versionedState)
 		if err != nil {

@@ -208,7 +208,7 @@ func GenerateWithdrawalFieldsProof(
 	var withdrawalBlock deneb.BeaconBlock
 
 	withdrawalToModifyIndex := uint64(0)
-	_, dynSSZ := SetUpWithdrawalsProof(
+	_, dynSSZ := SetUpWithdrawalsProofDeneb(
 		oracleBlockHeaderFile, stateFile, historicalSummaryStateFile, headerFile,
 		bodyFile, &oracleBeaconBlockHeader, &oracleState, &historicalSummaryState,
 		&withdrawalBlockHeader, &withdrawalBlock, modifyStateToIncludeFullWithdrawal,

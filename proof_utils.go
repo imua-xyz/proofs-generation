@@ -245,7 +245,12 @@ func GetValidatorFields(v *phase0.Validator) []string {
 	return validatorFields
 }
 
-func ProveValidatorFields(epp *EigenPodProofs, oracleBlockHeader *phase0.BeaconBlockHeader, oracleBeaconState *spec.VersionedBeaconState, validatorIndex uint64) (*StateRootProof, common.Proof, error) {
+func ProveValidatorFields(
+	epp *EigenPodProofs,
+	oracleBlockHeader *phase0.BeaconBlockHeader,
+	oracleBeaconState *spec.VersionedBeaconState,
+	validatorIndex uint64,
+) (*StateRootProof, common.Proof, error) {
 	oracleBeaconStateSlot, err := oracleBeaconState.Slot()
 	if err != nil {
 		return nil, nil, err
