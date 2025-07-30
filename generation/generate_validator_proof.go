@@ -46,7 +46,11 @@ func GenerateValidatorFieldsProof(
 	}
 	epp = epp.WithNetworkSpec(spec)
 
-	beaconStateRoot, err := epp.HashTreeRoot(state)
+	beaconStateRoot, err := epp.HashTreeRoot(&state)
+	if err != nil {
+		log.Debug().AnErr("Error with HashTreeRoot", err)
+		return err
+	}
 
 	versionedState, err := beacon.CreateVersionedState(&state)
 	if err != nil {

@@ -111,7 +111,7 @@ func GenerateWithdrawalFieldsProof(
 	epp = epp.WithNetworkSpec(spec)
 
 	// validatorIndex := phase0.ValidatorIndex(index)
-	beaconStateRoot, err := epp.HashTreeRoot(state)
+	beaconStateRoot, err := epp.HashTreeRoot(&state)
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with HashTreeRoot of state", err)
 		return err
