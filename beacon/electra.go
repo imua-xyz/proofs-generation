@@ -15,10 +15,11 @@ import (
 func ComputeBeaconStateTopLevelRootsElectra(
 	b *electra.BeaconState, networkSpec map[string]any, dynSSZ *dynssz.DynSsz,
 ) (*VersionedBeaconStateTopLevelRoots, error) {
+
 	var err error
 	beaconStateTopLevelRoots := &BeaconStateTopLevelRootsElectra{}
 
-	hh := ssz.NewHasher()
+	hh := dynssz.NewHasher()
 
 	// Field (0) 'GenesisTime'
 	hh.PutUint64(b.GenesisTime)
@@ -46,6 +47,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	if b.Fork == nil {
 		b.Fork = new(phase0.Fork)
 	}
+	// Fork is not dependent on the spec.
 	if err = b.Fork.HashTreeRootWith(hh); err != nil {
 		return nil, err
 	}
@@ -58,6 +60,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	if b.LatestBlockHeader == nil {
 		b.LatestBlockHeader = new(phase0.BeaconBlockHeader)
 	}
+	// blockHeader is not dependent on the spec.
 	if err = b.LatestBlockHeader.HashTreeRootWith(hh); err != nil {
 		return nil, err
 	}
@@ -68,8 +71,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (5) 'BlockRoots'
 	{
-		if size := len(b.BlockRoots); size != 8192 {
-			err = ssz.ErrVectorLengthFn("BeaconState.BlockRoots", size, 8192)
+		allowedSize, err := GetSlotsPerHistoricalRoot(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.BlockRoots); size != allowedSize {
+			err = ssz.ErrVectorLengthFn("BeaconState.BlockRoots", size, allowedSize)
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -89,8 +96,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (6) 'StateRoots'
 	{
-		if size := len(b.StateRoots); size != 8192 {
-			err = ssz.ErrVectorLengthFn("BeaconState.StateRoots", size, 8192)
+		allowedSize, err := GetSlotsPerHistoricalRoot(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.StateRoots); size != allowedSize {
+			err = ssz.ErrVectorLengthFn("BeaconState.StateRoots", size, allowedSize)
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -110,8 +121,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (7) 'HistoricalRoots'
 	{
-		if size := len(b.HistoricalRoots); size > 16777216 {
-			err = ssz.ErrListTooBigFn("BeaconState.HistoricalRoots", size, 16777216)
+		maxSize, err := GetHistoricalRootsLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.HistoricalRoots); size > maxSize {
+			err = ssz.ErrListTooBigFn("BeaconState.HistoricalRoots", size, maxSize)
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -123,7 +138,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 			hh.Append(i[:])
 		}
 		numItems := uint64(len(b.HistoricalRoots))
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(16777216, numItems, 32))
+		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(uint64(maxSize), numItems, 32))
 		tmp7 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.HistoricalRootsRoot = &tmp7
 		// copy(beaconStateTopLevelRoots.HistoricalRootsRoot[:], hh.Hash())
@@ -134,6 +149,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	if b.ETH1Data == nil {
 		b.ETH1Data = new(phase0.ETH1Data)
 	}
+	// eth1Data is not dependent on the spec.
 	if err = b.ETH1Data.HashTreeRootWith(hh); err != nil {
 		return nil, err
 	}
@@ -144,18 +160,23 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (9) 'ETH1DataVotes'
 	{
+		size, err := GetEth1DataVotesLength(networkSpec)
+		if err != nil {
+			return nil, err
+		}
 		subIndx := hh.Index()
 		num := uint64(len(b.ETH1DataVotes))
-		if num > 2048 {
+		if num > size {
 			err = ssz.ErrIncorrectListSize
 			return nil, err
 		}
 		for _, elem := range b.ETH1DataVotes {
+			// eth1DataVote is not dependent on the spec.
 			if err = elem.HashTreeRootWith(hh); err != nil {
 				return nil, err
 			}
 		}
-		hh.MerkleizeWithMixin(subIndx, num, 2048)
+		hh.MerkleizeWithMixin(subIndx, num, size)
 		tmp9 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.ETH1DataVotesRoot = &tmp9
 		// copy(beaconStateTopLevelRoots.ETH1DataVotesRoot[:], hh.Hash())
@@ -171,18 +192,23 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (11) 'Validators'
 	{
+		maxSize, err := GetValidatorRegistryLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
 		subIndx := hh.Index()
 		num := uint64(len(b.Validators))
-		if num > 1099511627776 {
+		if num > maxSize {
 			err = ssz.ErrIncorrectListSize
 			return nil, err
 		}
 		for _, elem := range b.Validators {
+			// validator is not dependent on the spec
 			if err = elem.HashTreeRootWith(hh); err != nil {
 				return nil, err
 			}
 		}
-		hh.MerkleizeWithMixin(subIndx, num, 1099511627776)
+		hh.MerkleizeWithMixin(subIndx, num, maxSize)
 		tmp11 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.ValidatorsRoot = &tmp11
 		// copy(beaconStateTopLevelRoots.ValidatorsRoot[:], hh.Hash())
@@ -191,8 +217,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (12) 'Balances'
 	{
-		if size := len(b.Balances); size > 1099511627776 {
-			err = ssz.ErrListTooBigFn("BeaconState.Balances", size, 1099511627776)
+		maxSize, err := GetValidatorRegistryLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.Balances); uint64(size) > maxSize {
+			err = ssz.ErrListTooBigFn("BeaconState.Balances", size, int(maxSize))
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -202,7 +232,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 		hh.FillUpTo32()
 		numItems := uint64(len(b.Balances))
 
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(1099511627776, numItems, 8))
+		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(maxSize, numItems, 8))
 		tmp12 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.BalancesRoot = &tmp12
 		// copy(beaconStateTopLevelRoots.BalancesRoot[:], hh.Hash())
@@ -211,8 +241,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (13) 'RANDAOMixes'
 	{
-		if size := len(b.RANDAOMixes); size != 65536 {
-			err = ssz.ErrVectorLengthFn("BeaconState.RANDAOMixes", size, 65536)
+		allowedSize, err := GetEpochsPerHistoricalVector(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.RANDAOMixes); size != allowedSize {
+			err = ssz.ErrVectorLengthFn("BeaconState.RANDAOMixes", size, allowedSize)
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -232,8 +266,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (14) 'Slashings'
 	{
-		if size := len(b.Slashings); size != 8192 {
-			err = ssz.ErrVectorLengthFn("BeaconState.Slashings", size, 8192)
+		allowedSize, err := GetEpochsPerSlashingsVector(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.Slashings); size != allowedSize {
+			err = ssz.ErrVectorLengthFn("BeaconState.Slashings", size, allowedSize)
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -249,8 +287,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (15) 'PreviousEpochParticipation'
 	{
-		if size := len(b.PreviousEpochParticipation); size > 1099511627776 {
-			err = ssz.ErrListTooBigFn("BeaconState.PreviousEpochParticipation", size, 1099511627776)
+		maxSize, err := GetValidatorRegistryLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.PreviousEpochParticipation); uint64(size) > maxSize {
+			err = ssz.ErrListTooBigFn("BeaconState.PreviousEpochParticipation", size, int(maxSize))
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -259,7 +301,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 		}
 		hh.FillUpTo32()
 		numItems := uint64(len(b.PreviousEpochParticipation))
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(1099511627776, numItems, 1))
+		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(maxSize, numItems, 1))
 		tmp15 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.PreviousEpochParticipationRoot = &tmp15
 		// copy(beaconStateTopLevelRoots.PreviousEpochParticipationRoot[:], hh.Hash())
@@ -268,8 +310,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (16) 'CurrentEpochParticipation'
 	{
-		if size := len(b.CurrentEpochParticipation); size > 1099511627776 {
-			err = ssz.ErrListTooBigFn("BeaconState.CurrentEpochParticipation", size, 1099511627776)
+		maxSize, err := GetValidatorRegistryLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.CurrentEpochParticipation); size > int(maxSize) {
+			err = ssz.ErrListTooBigFn("BeaconState.CurrentEpochParticipation", size, int(maxSize))
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -278,7 +324,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 		}
 		hh.FillUpTo32()
 		numItems := uint64(len(b.CurrentEpochParticipation))
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(1099511627776, numItems, 1))
+		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(maxSize, numItems, 1))
 		tmp16 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.CurrentEpochParticipationRoot = &tmp16
 		// copy(beaconStateTopLevelRoots.CurrentEpochParticipationRoot[:], hh.Hash())
@@ -299,6 +345,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	if b.PreviousJustifiedCheckpoint == nil {
 		b.PreviousJustifiedCheckpoint = new(phase0.Checkpoint)
 	}
+	// checkpoint is not dependent on the spec
 	if err = b.PreviousJustifiedCheckpoint.HashTreeRootWith(hh); err != nil {
 		return nil, err
 	}
@@ -311,6 +358,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	if b.CurrentJustifiedCheckpoint == nil {
 		b.CurrentJustifiedCheckpoint = new(phase0.Checkpoint)
 	}
+	// checkpoint is not dependent on the spec
 	if err = b.CurrentJustifiedCheckpoint.HashTreeRootWith(hh); err != nil {
 		return nil, err
 	}
@@ -323,6 +371,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	if b.FinalizedCheckpoint == nil {
 		b.FinalizedCheckpoint = new(phase0.Checkpoint)
 	}
+	// checkpoint is not dependent on the spec
 	if err = b.FinalizedCheckpoint.HashTreeRootWith(hh); err != nil {
 		return nil, err
 	}
@@ -333,8 +382,12 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (21) 'InactivityScores'
 	{
-		if size := len(b.InactivityScores); size > 1099511627776 {
-			err = ssz.ErrListTooBigFn("BeaconState.InactivityScores", size, 1099511627776)
+		maxSize, err := GetValidatorRegistryLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		if size := len(b.InactivityScores); size > int(maxSize) {
+			err = ssz.ErrListTooBigFn("BeaconState.InactivityScores", size, int(maxSize))
 			return nil, err
 		}
 		subIndx := hh.Index()
@@ -343,7 +396,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 		}
 		hh.FillUpTo32()
 		numItems := uint64(len(b.InactivityScores))
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(1099511627776, numItems, 8))
+		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(maxSize, numItems, 8))
 		tmp21 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.InactivityScoresRoot = &tmp21
 		// copy(beaconStateTopLevelRoots.InactivityScoresRoot[:], hh.Hash())
@@ -354,7 +407,8 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	if b.CurrentSyncCommittee == nil {
 		b.CurrentSyncCommittee = new(altair.SyncCommittee)
 	}
-	if err = b.CurrentSyncCommittee.HashTreeRootWith(hh); err != nil {
+	// sync committee is dependent on the spec's SYNC_COMMITTEE_SIZE
+	if err = dynSSZ.HashTreeRootWith(b.CurrentSyncCommittee, hh); err != nil {
 		return nil, err
 	}
 	tmp22 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
@@ -366,7 +420,8 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	if b.NextSyncCommittee == nil {
 		b.NextSyncCommittee = new(altair.SyncCommittee)
 	}
-	if err = b.NextSyncCommittee.HashTreeRootWith(hh); err != nil {
+	// sync committee is dependent on the spec's SYNC_COMMITTEE_SIZE
+	if err = dynSSZ.HashTreeRootWith(b.NextSyncCommittee, hh); err != nil {
 		return nil, err
 	}
 	tmp23 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
@@ -375,6 +430,7 @@ func ComputeBeaconStateTopLevelRootsElectra(
 	hh.Reset()
 
 	// Field (24) 'LatestExecutionPayloadHeader'
+	// not dependent on the spec, although the payload itself is
 	if err = b.LatestExecutionPayloadHeader.HashTreeRootWith(hh); err != nil {
 		return nil, err
 	}
@@ -397,18 +453,23 @@ func ComputeBeaconStateTopLevelRootsElectra(
 
 	// Field (27) 'HistoricalSummaries'
 	{
+		maxSize, err := GetHistoricalRootsLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
 		subIndx := hh.Index()
-		num := uint64(len(b.HistoricalSummaries))
-		if num > 16777216 {
+		num := len(b.HistoricalSummaries)
+		if num > maxSize {
 			err = ssz.ErrIncorrectListSize
 			return nil, err
 		}
 		for _, elem := range b.HistoricalSummaries {
+			// not dependent on the spec
 			if err = elem.HashTreeRootWith(hh); err != nil {
 				return nil, err
 			}
 		}
-		hh.MerkleizeWithMixin(subIndx, num, 16777216)
+		hh.MerkleizeWithMixin(subIndx, uint64(num), uint64(maxSize))
 		tmp27 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.HistoricalSummariesRoot = &tmp27
 		hh.Reset()
@@ -504,6 +565,83 @@ func ComputeBeaconStateTopLevelRootsElectra(
 		hh.MerkleizeWithMixin(subIndx, num, 262144)
 		tmp36 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
 		beaconStateTopLevelRoots.PendingConsolidationsRoot = &tmp36
+		hh.Reset()
+	}
+
+	// Field (37) `PendingDeposits`
+	{
+		maxSize, err := GetPendingDepositsLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		subIndx := hh.Index()
+		num := len(b.PendingDeposits)
+		if num > maxSize {
+			err = ssz.ErrIncorrectListSize
+			return nil, err
+		}
+		for _, elem := range b.PendingDeposits {
+			// check length of withdrawal credentials
+			if len(elem.WithdrawalCredentials) != 32 {
+				err = ssz.ErrIncorrectListSize
+				return nil, err
+			}
+			// not dependent on the spec
+			if err = elem.HashTreeRootWith(hh); err != nil {
+				return nil, err
+			}
+		}
+		hh.MerkleizeWithMixin(subIndx, uint64(num), uint64(maxSize))
+		tmp37 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingDepositsRoot = &tmp37
+		hh.Reset()
+	}
+
+	// Field (38) `PendingPartialWithdrawals`
+	{
+		maxSize, err := GetPendingPartialWithdrawalsLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		subIndx := hh.Index()
+		num := len(b.PendingPartialWithdrawals)
+		if num > maxSize {
+			err = ssz.ErrIncorrectListSize
+			return nil, err
+		}
+		for _, elem := range b.PendingPartialWithdrawals {
+			// not dependent on the spec
+			if err = elem.HashTreeRootWith(hh); err != nil {
+				return nil, err
+			}
+		}
+		hh.MerkleizeWithMixin(subIndx, uint64(num), uint64(maxSize))
+		tmp38 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingPartialWithdrawalsRoot = &tmp38
+		hh.Reset()
+	}
+
+	// Field (39) `PendingConsolidations`
+	{
+		maxSize, err := GetPendingConsolidationsLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		subIndx := hh.Index()
+		num := len(b.PendingConsolidations)
+		if num > maxSize {
+			err = ssz.ErrIncorrectListSize
+			return nil, err
+		}
+		for _, elem := range b.PendingConsolidations {
+			// not dependent on the spec
+			if err = elem.HashTreeRootWith(hh); err != nil {
+				return nil, err
+			}
+		}
+		hh.MerkleizeWithMixin(subIndx, uint64(num), uint64(maxSize))
+		tmp39 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingConsolidationsRoot = &tmp39
 		hh.Reset()
 	}
 

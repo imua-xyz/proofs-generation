@@ -6,6 +6,7 @@ import (
 	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 )
 
@@ -15,6 +16,8 @@ func GetHistoricalSummaries(state *spec.VersionedBeaconState) ([]*capella.Histor
 		return state.Capella.HistoricalSummaries, nil
 	case spec.DataVersionDeneb:
 		return state.Deneb.HistoricalSummaries, nil
+	case spec.DataVersionElectra:
+		return state.Electra.HistoricalSummaries, nil
 	default:
 		return nil, errors.New("unsupported beacon state version")
 	}
@@ -26,6 +29,8 @@ func GetGenesisTime(state *spec.VersionedBeaconState) (uint64, error) {
 		return state.Capella.GenesisTime, nil
 	case spec.DataVersionDeneb:
 		return state.Deneb.GenesisTime, nil
+	case spec.DataVersionElectra:
+		return state.Electra.GenesisTime, nil
 	default:
 		return 0, errors.New("unsupported beacon state version")
 	}
@@ -39,6 +44,8 @@ func GetBlockRoots(beaconState spec.VersionedBeaconState) ([]phase0.Root, error)
 		blockRoots = beaconState.Deneb.BlockRoots
 	case spec.DataVersionCapella:
 		blockRoots = beaconState.Capella.BlockRoots
+	case spec.DataVersionElectra:
+		blockRoots = beaconState.Electra.BlockRoots
 	default:
 		return nil, errors.New("unsupported beacon state version")
 	}
@@ -58,6 +65,11 @@ func CreateVersionedSignedBlock(block interface{}) (spec.VersionedSignedBeaconBl
 		signedBlock.Message = &s
 		versionedBlock.Capella = &signedBlock
 		versionedBlock.Version = spec.DataVersionCapella
+	case electra.BeaconBlock:
+		var signedBlock electra.SignedBeaconBlock
+		signedBlock.Message = &s
+		versionedBlock.Electra = &signedBlock
+		versionedBlock.Version = spec.DataVersionElectra
 	default:
 		return versionedBlock, errors.New("unsupported beacon block version")
 	}
@@ -68,6 +80,9 @@ func CreateVersionedState(state interface{}) (spec.VersionedBeaconState, error) 
 	var versionedState spec.VersionedBeaconState
 
 	switch s := state.(type) {
+	case *electra.BeaconState:
+		versionedState.Electra = s
+		versionedState.Version = spec.DataVersionElectra
 	case *deneb.BeaconState:
 		versionedState.Deneb = s
 		versionedState.Version = spec.DataVersionDeneb
@@ -90,7 +105,13 @@ func UnmarshalSSZVersionedBeaconState(data []byte) (*spec.VersionedBeaconState, 
 		capellaBeaconState := &capella.BeaconState{}
 		err = capellaBeaconState.UnmarshalSSZ(data)
 		if err != nil {
-			return nil, err
+			electraBeaconState := &electra.BeaconState{}
+			err = electraBeaconState.UnmarshalSSZ(data)
+			if err != nil {
+				return nil, err
+			}
+			beaconState.Electra = electraBeaconState
+			beaconState.Version = spec.DataVersionElectra
 		} else {
 			beaconState.Capella = capellaBeaconState
 			beaconState.Version = spec.DataVersionCapella
@@ -112,11 +133,16 @@ func MarshalSSZVersionedBeaconState(beaconState spec.VersionedBeaconState) ([]by
 		if err != nil {
 			return nil, err
 		}
-	} else {
+	} else if beaconState.Version == spec.DataVersionCapella {
 		data, err = beaconState.Capella.MarshalSSZ()
 		if err != nil {
-			return nil, err
+			data, err = beaconState.Electra.MarshalSSZ()
+			if err != nil {
+				return nil, err
+			}
 		}
+	} else {
+		return nil, errors.New("unsupported beacon state version")
 	}
 
 	return data, nil

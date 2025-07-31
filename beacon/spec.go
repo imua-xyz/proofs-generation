@@ -138,3 +138,23 @@ func GetMaxBytesPerTransaction(spec map[string]any) (uint64, error) {
 func GetMaxWithdrawals(spec map[string]any) (uint64, error) {
 	return GetValueFromKey[uint64](spec, "MAX_WITHDRAWALS_PER_PAYLOAD")
 }
+
+/* ELECTRA */
+
+// GetPendingDepositsLimit returns the maximum number of pending deposits that can be stored in
+// a beacon state.
+func GetPendingDepositsLimit(spec map[string]any) (int, error) {
+	return GetValueFromKey[int](spec, "PENDING_DEPOSITS_LIMIT")
+}
+
+// GetPendingPartialWithdrawalsLimit returns the maximum number of pending partial withdrawals
+// that can be stored in a beacon state.
+func GetPendingPartialWithdrawalsLimit(spec map[string]any) (int, error) {
+	return GetValueFromKey[int](spec, "PENDING_PARTIAL_WITHDRAWALS_LIMIT")
+}
+
+// GetPendingConsolidationsLimit returns the maximum number of pending consolidations that can
+// be stored in a beacon state.
+func GetPendingConsolidationsLimit(spec map[string]any) (int, error) {
+	return GetValueFromKey[int](spec, "PENDING_CONSOLIDATIONS_LIMIT")
+}
