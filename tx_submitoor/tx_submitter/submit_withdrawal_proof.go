@@ -31,6 +31,8 @@ type WithdrawalProofConfig struct {
 		WithdrawalBlockBodyFiles    []string `json:"WITHDRAWAL_BLOCK_BODY_FILES,required"`
 		HistoricalSummaryStateFiles []string `json:"HISTORICAL_SUMMARY_STATE_FILES,required"`
 	}
+
+	SpecFile string `json:"SPEC_FILE,required"`
 }
 
 func (u *EigenPodProofTxSubmitter) GenerateVerifyAndProcessWithdrawalsTx(
@@ -110,6 +112,13 @@ func (u *EigenPodProofTxSubmitter) SubmitVerifyAndProcessWithdrawalsTx(withdrawa
 		return nil, err
 	}
 
+	networkSpec, err := commonutils.ParseSpecJSONFile(cfg.SpecFile)
+	if err != nil {
+		log.Debug().AnErr("Error with parsing spec file", err)
+		return nil, err
+	}
+	u.eigenPodProofs = u.eigenPodProofs.WithNetworkSpec(networkSpec)
+
 	oracleBeaconBlockHeader, err := commonutils.ExtractBlockHeader(cfg.BeaconStateFiles.OracleBlockHeaderFile)
 	if err != nil {
 		log.Debug().AnErr("Error with parsing header file", err)
@@ -125,6 +134,10 @@ func (u *EigenPodProofTxSubmitter) SubmitVerifyAndProcessWithdrawalsTx(withdrawa
 	commonutils.ParseDenebBeaconStateFromJSON(*oracleStateJSON, &oracleState)
 
 	versionedOracleState, err := beacon.CreateVersionedState(&oracleState)
+	if err != nil {
+		log.Debug().AnErr("Error with CreateVersionedState", err)
+		return nil, err
+	}
 
 	historicalSummaryStateBlockRoots := make([][]phase0.Root, 0)
 	for _, file := range cfg.WithdrawalDetails.HistoricalSummaryStateFiles {
@@ -147,6 +160,10 @@ func (u *EigenPodProofTxSubmitter) SubmitVerifyAndProcessWithdrawalsTx(withdrawa
 			return nil, err
 		}
 		versionedSignedBlock, err := beacon.CreateVersionedSignedBlock(block)
+		if err != nil {
+			log.Debug().AnErr("Error with CreateVersionedSignedBlock", err)
+			return nil, err
+		}
 		withdrawalBlocks = append(withdrawalBlocks, &versionedSignedBlock)
 	}
 

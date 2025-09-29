@@ -16,6 +16,8 @@ import (
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 
 	beacon "github.com/Layr-Labs/eigenpod-proofs-generation/beacon"
+
+	dynssz "github.com/pk910/dynamic-ssz"
 )
 
 type WithdrawalProofs struct {
@@ -126,7 +128,7 @@ type InputDataBlockCapella struct {
 	Finalized            bool `json:"finalized"`
 }
 
-func SetUpWithdrawalsProof(
+func SetUpWithdrawalsProofDeneb(
 	oracleBlockHeaderFile string,
 	stateFile string,
 	historicalSummaryStateFile string,
@@ -143,8 +145,15 @@ func SetUpWithdrawalsProof(
 	historicalSummariesIndex uint64,
 	withdrawalToModifyIndex uint64,
 	advanceSlotOfWithdrawal bool,
-) *deneb.BeaconBlock {
+	specFile string,
+	networkSpec map[string]any,
+) (*deneb.BeaconBlock, *dynssz.DynSsz) {
 	log.Println("Setting up suite")
+
+	if err := eigenpodproofs.ParseSpecJSONFile(specFile, networkSpec); err != nil {
+		fmt.Println("error with parsing spec file", err)
+	}
+
 	// filename1 := "data/slot_58000/oracle_capella_beacon_state_58100.ssz"
 	// filename2 := "data/slot_58000/capella_block_header_58000.json"
 	// filename3 := "data/slot_58000/capella_block_58000.json"
@@ -182,6 +191,8 @@ func SetUpWithdrawalsProof(
 
 	fmt.Println("blockHeader slot", block.ParentRoot)
 
+	dynSSZ := dynssz.NewDynSsz(networkSpec)
+
 	//this exists so that if there is not a full withdrawal in the block, we can modify the state to include one.
 	if modifyStateToIncludeFullWithdrawal {
 		if !partialWithdrawalProof {
@@ -192,20 +203,23 @@ func SetUpWithdrawalsProof(
 			block.Body.ExecutionPayload.Timestamp = block.Body.ExecutionPayload.Timestamp + 1
 		}
 
-		bodyRoot, _ := block.Body.HashTreeRoot()
+		bodyRoot, _ := dynSSZ.HashTreeRoot(block.Body)
 		blockHeader.BodyRoot = bodyRoot
 
-		root, _ := historicalSummaryState.HashTreeRoot()
+		root, _ := dynSSZ.HashTreeRoot(historicalSummaryState)
 		fmt.Println("old state root", hex.EncodeToString(root[:]))
 
+		// not a dynamic structure, so we can use fastssz
 		blockHeaderRoot, _ := blockHeader.HashTreeRoot()
 		//set the block root in the state
 		historicalSummaryState.BlockRoots[uint64(blockHeader.Slot)%8192] = blockHeaderRoot
-		historicalSummaryStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(historicalSummaryState)
+		historicalSummaryStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(
+			historicalSummaryState, networkSpec, dynSSZ,
+		)
 		if err != nil {
 			fmt.Println("error in getting top level roots", err)
 		}
-		state.HistoricalSummaries[historicalSummariesIndex].BlockSummaryRoot = *historicalSummaryStateTopLevelRoots.BlockRootsRoot
+		state.HistoricalSummaries[historicalSummariesIndex].BlockSummaryRoot = *historicalSummaryStateTopLevelRoots.Deneb.BlockRootsRoot
 
 		// set the withdrawable epoch of the validator to indicate a full withdrawal
 		if !partialWithdrawalProof {
@@ -213,7 +227,7 @@ func SetUpWithdrawalsProof(
 		}
 
 		//set the new stateRoot as the latestBlockHeader.state_root
-		newStateRoot, _ := state.HashTreeRoot()
+		newStateRoot, _ := dynSSZ.HashTreeRoot(state)
 		oracleBlockHeader.StateRoot = newStateRoot
 
 		fmt.Println("blockheader slot", blockHeader.Slot)
@@ -222,7 +236,7 @@ func SetUpWithdrawalsProof(
 	}
 	executionPayload = *block.Body.ExecutionPayload
 
-	return block
+	return block, dynSSZ
 
 }
 
@@ -243,8 +257,11 @@ func SetUpWithdrawalsProofCapella(
 	historicalSummariesIndex uint64,
 	withdrawalToModifyIndex uint64,
 	advanceSlotOfWithdrawal bool,
-) *capella.BeaconBlock {
+	specFile string,
+	networkSpec map[string]any,
+) (*capella.BeaconBlock, *dynssz.DynSsz) {
 	log.Println("Setting up suite")
+
 	// filename1 := "data/slot_58000/oracle_capella_beacon_state_58100.ssz"
 	// filename2 := "data/slot_58000/capella_block_header_58000.json"
 	// filename3 := "data/slot_58000/capella_block_58000.json"
@@ -252,6 +269,12 @@ func SetUpWithdrawalsProofCapella(
 	// filename2 := "data/slot_43222/capella_block_header_43222.json"
 	// filename3 := "data/slot_43222/capella_block_43222.json"
 	var err error
+
+	fmt.Println("SetUpWithdrawalsProofCapella: specFile", specFile)
+	if err := eigenpodproofs.ParseSpecJSONFile(specFile, networkSpec); err != nil {
+		fmt.Println("error with parsing spec file", err)
+	}
+
 	fmt.Println("SetUpWithdrawalsProofCapella: oracleBlockHeaderFile", oracleBlockHeaderFile)
 	*oracleBlockHeader, err = ExtractBlockHeader(oracleBlockHeaderFile)
 	if err != nil {
@@ -283,6 +306,8 @@ func SetUpWithdrawalsProofCapella(
 
 	fmt.Println("blockHeader slot", block.ParentRoot)
 
+	dynSSZ := dynssz.NewDynSsz(networkSpec)
+
 	//this exists so that if there is not a full withdrawal in the block, we can modify the state to include one.
 	if modifyStateToIncludeFullWithdrawal {
 		if !partialWithdrawalProof {
@@ -293,20 +318,21 @@ func SetUpWithdrawalsProofCapella(
 			block.Body.ExecutionPayload.Timestamp = block.Body.ExecutionPayload.Timestamp + 1
 		}
 
-		bodyRoot, _ := block.Body.HashTreeRoot()
+		bodyRoot, _ := dynSSZ.HashTreeRoot(block.Body)
 		blockHeader.BodyRoot = bodyRoot
 
-		root, _ := historicalSummaryState.HashTreeRoot()
+		root, _ := dynSSZ.HashTreeRoot(historicalSummaryState)
 		fmt.Println("old state root", hex.EncodeToString(root[:]))
 
+		// not a dynamic structure, so we can use fastssz
 		blockHeaderRoot, _ := blockHeader.HashTreeRoot()
 		//set the block root in the state
 		historicalSummaryState.BlockRoots[uint64(blockHeader.Slot)%8192] = blockHeaderRoot
-		historicalSummaryStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsCapella(historicalSummaryState)
+		historicalSummaryStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsCapella(historicalSummaryState, networkSpec)
 		if err != nil {
 			fmt.Println("error in getting top level roots", err)
 		}
-		state.HistoricalSummaries[historicalSummariesIndex].BlockSummaryRoot = *historicalSummaryStateTopLevelRoots.BlockRootsRoot
+		state.HistoricalSummaries[historicalSummariesIndex].BlockSummaryRoot = *historicalSummaryStateTopLevelRoots.Deneb.BlockRootsRoot
 
 		// set the withdrawable epoch of the validator to indicate a full withdrawal
 		if !partialWithdrawalProof {
@@ -314,7 +340,7 @@ func SetUpWithdrawalsProofCapella(
 		}
 
 		//set the new stateRoot as the latestBlockHeader.state_root
-		newStateRoot, _ := state.HashTreeRoot()
+		newStateRoot, _ := dynSSZ.HashTreeRoot(state)
 		oracleBlockHeader.StateRoot = newStateRoot
 
 		fmt.Println("blockheader slot", blockHeader.Slot)
@@ -323,13 +349,22 @@ func SetUpWithdrawalsProofCapella(
 	}
 	executionPayloadCapella = *block.Body.ExecutionPayload
 
-	return block
+	return block, dynSSZ
 
 }
 
-func SetupValidatorProof(oracleBlockHeaderFile string, stateFile string, validatorIndex uint64, changeBalance bool, newBalance uint64, incrementSlot uint64, state *deneb.BeaconState, oracleBlockHeader *phase0.BeaconBlockHeader) {
+func SetupValidatorProof(
+	oracleBlockHeaderFile string, stateFile string, validatorIndex uint64,
+	changeBalance bool, newBalance uint64, incrementSlot uint64,
+	state *deneb.BeaconState, oracleBlockHeader *phase0.BeaconBlockHeader,
+	specFile string, networkSpec map[string]any,
+) *dynssz.DynSsz {
 	//filename1 := "data/slot_58000/oracle_capella_beacon_state_58100.ssz" //this is the file for the repointed validator (either 61336 or 61068)
 	//filename1 := "data/slot_209635/oracle_capella_beacon_state_209635.ssz" //this is the file for the slashed validator 61511
+
+	if err := eigenpodproofs.ParseSpecJSONFile(specFile, networkSpec); err != nil {
+		fmt.Println("error with parsing spec file", err)
+	}
 
 	stateJSON, err := eigenpodproofs.ParseDenebStateJSONFile(stateFile)
 	if err != nil {
@@ -360,9 +395,15 @@ func SetupValidatorProof(oracleBlockHeaderFile string, stateFile string, validat
 		state.Validators[validatorIndex].EffectiveBalance = phase0.Gwei(newBalance)
 	}
 
-	newStateRoot, err := state.HashTreeRoot()
+	dynSSZ := dynssz.NewDynSsz(networkSpec)
+	newStateRoot, err := dynSSZ.HashTreeRoot(state)
+	if err != nil {
+		fmt.Println("error with HashTreeRoot of state", err)
+	}
 	//Now that we've made these changes to "state", we need to update the oracleState.LatestBlockHeader.StateRoot
 	oracleBlockHeader.StateRoot = newStateRoot
+
+	return dynSSZ
 }
 
 func ConvertBytesToStrings(b [][32]byte) []string {

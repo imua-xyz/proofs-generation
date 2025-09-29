@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -29,6 +31,7 @@ type BeaconClient struct {
 	blockHeaderProvider eth2client.BeaconBlockHeadersProvider
 	stateProvider       eth2client.BeaconStateProvider
 	blockProvider       eth2client.SignedBeaconBlockProvider
+	specProvider        eth2client.SpecProvider
 }
 
 func NewBeaconClient(provider string) (*BeaconClient, context.CancelFunc, error) {
@@ -42,6 +45,7 @@ func NewBeaconClient(provider string) (*BeaconClient, context.CancelFunc, error)
 		// LogLevel supplies the level of logging to carry out.
 		http.WithLogLevel(zerolog.WarnLevel),
 		http.WithTimeout(15*time.Minute),
+		http.WithCustomSpecSupport(true),
 	)
 	if err != nil {
 		return nil, cancel, err
@@ -61,6 +65,12 @@ func NewBeaconClient(provider string) (*BeaconClient, context.CancelFunc, error)
 
 	if provider, isProvider := client.(eth2client.SignedBeaconBlockProvider); isProvider {
 		beaconClient.blockProvider = provider
+	} else {
+		return nil, cancel, err
+	}
+
+	if provider, isProvider := client.(eth2client.SpecProvider); isProvider {
+		beaconClient.specProvider = provider
 	} else {
 		return nil, cancel, err
 	}
@@ -88,6 +98,12 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 		return nil, err
 	}
 
+	specResponse, err := beaconClient.specProvider.Spec(ctx, &api.SpecOpts{})
+	if err != nil {
+		return nil, err
+	}
+	networkSpec := specResponse.Data
+
 	blockHeaderResponse, err := beaconClient.blockHeaderProvider.BeaconBlockHeader(ctx, &api.BeaconBlockHeaderOpts{Block: strconv.FormatUint(req.Slot, 10)})
 	if err != nil {
 		return nil, err
@@ -96,15 +112,36 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 
 	beaconStateResponse, err := beaconClient.stateProvider.BeaconState(ctx, &api.BeaconStateOpts{State: strconv.FormatUint(req.Slot, 10)})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting beacon state: %w", err)
 	}
 	versionedState = beaconStateResponse.Data
+	if versionedState.Deneb == nil && versionedState.Electra == nil {
+		return nil, errors.New("only post-Deneb chains are supported")
+	}
+	// TODO: maybe there is a better way to do this that doesn't involve repetition
+	electra := versionedState.Electra != nil
+	if electra {
+		if req.ValidatorIndex >= uint64(len(versionedState.Electra.Validators)) {
+			return nil, errors.New("validator index out of range")
+		}
+		if versionedState.Electra.LatestExecutionPayloadHeader == nil {
+			return nil, errors.New("latest execution payload header not found")
+		}
+	} else {
+		if req.ValidatorIndex >= uint64(len(versionedState.Deneb.Validators)) {
+			return nil, errors.New("validator index out of range")
+		}
+		if versionedState.Deneb.LatestExecutionPayloadHeader == nil {
+			return nil, errors.New("latest execution payload header not found")
+		}
+	}
 
 	epp, err := eigenpodproofs.NewEigenPodProofs(s.chainId, 1000)
 	if err != nil {
 		log.Debug().AnErr("Error creating EPP object", err)
 		return nil, err
 	}
+	epp = epp.WithNetworkSpec(networkSpec)
 
 	stateRootProof, validatorContainerProof, err := eigenpodproofs.ProveValidatorFields(epp, beaconBlockHeader, versionedState, req.ValidatorIndex)
 	if err != nil {
@@ -112,11 +149,26 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 		return nil, err
 	}
 
+	if !electra {
+		return &ValidatorProofResponse{
+			StateRoot:               "0x" + hex.EncodeToString(beaconBlockHeader.StateRoot[:]),
+			StateRootProof:          commonutils.ConvertBytesToStrings(stateRootProof.StateRootProof.ToBytesSlice()),
+			ValidatorContainer:      commonutils.GetValidatorFields(versionedState.Deneb.Validators[req.ValidatorIndex]),
+			ValidatorContainerProof: commonutils.ConvertBytesToStrings(validatorContainerProof.ToBytesSlice()),
+			Slot:                    req.Slot,
+			ValidatorIndex:          req.ValidatorIndex,
+			Timestamp:               versionedState.Deneb.LatestExecutionPayloadHeader.Timestamp,
+		}, nil
+	}
+
 	return &ValidatorProofResponse{
 		StateRoot:               "0x" + hex.EncodeToString(beaconBlockHeader.StateRoot[:]),
 		StateRootProof:          commonutils.ConvertBytesToStrings(stateRootProof.StateRootProof.ToBytesSlice()),
-		ValidatorContainer:      commonutils.GetValidatorFields(versionedState.Deneb.Validators[req.ValidatorIndex]),
+		ValidatorContainer:      commonutils.GetValidatorFields(versionedState.Electra.Validators[req.ValidatorIndex]),
 		ValidatorContainerProof: commonutils.ConvertBytesToStrings(validatorContainerProof.ToBytesSlice()),
+		Slot:                    req.Slot,
+		ValidatorIndex:          req.ValidatorIndex,
+		Timestamp:               versionedState.Electra.LatestExecutionPayloadHeader.Timestamp,
 	}, nil
 }
 
@@ -137,11 +189,19 @@ func (s *ProofServer) GetWithdrawalProof(ctx context.Context, req *WithdrawalPro
 	}
 	defer cancel()
 
+	specResponse, err := beaconClient.specProvider.Spec(ctx, &api.SpecOpts{})
+	if err != nil {
+		return nil, err
+	}
+	networkSpec := specResponse.Data
+
 	epp, err := eigenpodproofs.NewEigenPodProofs(s.chainId, 1000)
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error creating EPP object", err)
 		return nil, err
 	}
+	epp = epp.
+		WithNetworkSpec(networkSpec)
 
 	targetBlockRootsGroupSummaryIndex, withdrawalBlockRootIndexInGroup, completeTargetBlockRootsGroupSlot, err = epp.GetWithdrawalProofParams(req.StateSlot, req.WithdrawalSlot)
 	if err != nil {
@@ -171,7 +231,11 @@ func (s *ProofServer) GetWithdrawalProof(ctx context.Context, req *WithdrawalPro
 	if err != nil {
 		return nil, err
 	}
-	completeTargetBlockRootsGroup = beaconStateResponse.Data.Deneb.BlockRoots
+	if beaconStateResponse.Data.Electra != nil {
+		completeTargetBlockRootsGroup = beaconStateResponse.Data.Electra.BlockRoots
+	} else {
+		completeTargetBlockRootsGroup = beaconStateResponse.Data.Deneb.BlockRoots
+	}
 
 	oracleStateContainerTopLevelRoots, err := epp.ComputeBeaconStateTopLevelRoots(oracleState)
 	if err != nil {
@@ -208,7 +272,13 @@ func (s *ProofServer) GetWithdrawalProof(ctx context.Context, req *WithdrawalPro
 		return nil, err
 	}
 
-	root, err := withdrawalBlock.Root()
+	electra := oracleState.Electra != nil
+	var root [32]byte
+	if electra {
+		root, err = epp.HashTreeRoot(withdrawalBlock.Electra.Message)
+	} else {
+		root, err = epp.HashTreeRoot(withdrawalBlock.Deneb.Message)
+	}
 	if err != nil {
 		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with get withdrawal block root", err)
 		return nil, err

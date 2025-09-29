@@ -16,3 +16,6 @@ solidityProofGen/solidityProofGen
 test
 
 **/.DS_Store
+
+server/server
+server/config.yaml

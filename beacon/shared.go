@@ -13,6 +13,7 @@ import (
 func ComputeValidatorTreeLeaves(validators []*phase0.Validator) ([]phase0.Root, error) {
 	validatorNodeList := make([]phase0.Root, len(validators))
 	for i := 0; i < len(validators); i++ {
+		// the validator structure does not change across any versions, so we can use fastssz
 		validatorRoot, err := validators[i].HashTreeRoot()
 		if err != nil {
 			return nil, err
@@ -76,7 +77,7 @@ func GetBalanceRoots(balances []phase0.Gwei) ([]phase0.Root, error) {
 	return balanceRootList, nil
 }
 
-func ProveBlockRootAgainstBeaconStateViaHistoricalSummaries(beaconStateTopLevelRoots *BeaconStateTopLevelRoots, historicalSummaries []*capella.HistoricalSummary, historicalBlockRoots []phase0.Root, historicalSummaryIndex uint64, blockRootIndex uint64) ([][32]byte, error) {
+func ProveBlockRootAgainstBeaconStateViaHistoricalSummaries(beaconStateTopLevelRoots *VersionedBeaconStateTopLevelRoots, historicalSummaries []*capella.HistoricalSummary, historicalBlockRoots []phase0.Root, historicalSummaryIndex uint64, blockRootIndex uint64) ([][32]byte, error) {
 	// prove the historical summaries against the beacon state
 	historicalSummariesListAgainstBeaconState, err := ProveBeaconTopLevelRootAgainstBeaconState(beaconStateTopLevelRoots, HistoricalSummaryListIndex)
 	if err != nil {
@@ -112,6 +113,7 @@ func ProveBlockRootAgainstBeaconStateViaHistoricalSummaries(beaconStateTopLevelR
 func ProveHistoricalSummaryAgainstHistoricalSummariesList(historicalSummaries []*capella.HistoricalSummary, historicalSummaryIndex uint64) (common.Proof, error) {
 	historicalSummaryNodeList := make([]phase0.Root, len(historicalSummaries))
 	for i := 0; i < len(historicalSummaries); i++ {
+		// historical summaries structure is not expected to change across versions, so we can use fastssz
 		historicalSummaryRoot, err := historicalSummaries[i].HashTreeRoot()
 		if err != nil {
 			return nil, err
@@ -178,6 +180,7 @@ func ProveWithdrawalListAgainstExecutionPayload(executionPayloadFieldRoots []pha
 func ProveWithdrawalAgainstWithdrawalList(withdrawals []*capella.Withdrawal, withdrawalIndex uint8) (common.Proof, error) {
 	withdrawalNodeList := make([]phase0.Root, len(withdrawals))
 	for i := 0; i < len(withdrawals); i++ {
+		// not a dynamic structure, so we can use fastssz
 		withdrawalRoot, err := withdrawals[i].HashTreeRoot()
 		if err != nil {
 			return nil, err

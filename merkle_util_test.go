@@ -92,6 +92,7 @@ func setupSuite() {
 		log.Panicf("failed to create beacon chain proofs contract: %s", err)
 	}
 
+	specFile := "data/deneb_goerli_spec.json"
 	stateFile := "data/deneb_goerli_slot_7413760.json"
 	oracleHeaderFile := "data/deneb_goerli_block_header_7413760.json"
 	headerFile := "data/deneb_goerli_block_header_7426113.json"
@@ -99,6 +100,10 @@ func setupSuite() {
 
 	//ParseCapellaBeaconState(stateFile)
 
+	networkSpec := make(map[string]any)
+	if err := ParseSpecJSONFile(specFile, networkSpec); err != nil {
+		fmt.Println("error with JSON parsing spec", err)
+	}
 	stateJSON, err := ParseJSONFile(stateFile)
 	if err != nil {
 		fmt.Println("error with JSON parsing beacon state")
@@ -128,11 +133,12 @@ func setupSuite() {
 	if err != nil {
 		fmt.Println("error in NewEigenPodProofs", err)
 	}
+	epp = epp.WithNetworkSpec(networkSpec)
 
 	epp.ComputeBeaconStateTopLevelRoots(&spec.VersionedBeaconState{Deneb: &oracleState})
 	epp.ComputeBeaconStateRoot(&oracleState)
 
-	executionPayloadFieldRoots, _ = beacon.ComputeExecutionPayloadFieldRootsDeneb(block.Body.ExecutionPayload)
+	executionPayloadFieldRoots, _ = beacon.ComputeExecutionPayloadFieldRootsDeneb(block.Body.ExecutionPayload, networkSpec)
 }
 
 func teardownSuite() {
@@ -161,7 +167,7 @@ func TestProveValidatorContainers(t *testing.T) {
 	flag := verifyStateRootAgainstBlockHeaderProof(oracleBlockHeader, oracleState, stateRootProof.StateRootProof)
 	assert.True(t, flag, "State Root Proof %v failed")
 	flag = verifyValidatorAgainstBeaconState(&oracleState, validatorFieldsProofs[0], validatorIndices[0])
-	assert.True(t, flag, "State Root Proof %v failed")
+	assert.True(t, flag, "Validator Proof %v failed")
 }
 
 func TestProveWithdrawals(t *testing.T) {
@@ -349,7 +355,7 @@ func TestGenerateWithdrawalCredentialsProof(t *testing.T) {
 	// picking up one random validator index
 	validatorIndex := phase0.ValidatorIndex(REPOINTED_VALIDATOR_INDEX)
 
-	beaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState)
+	beaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState, epp.networkSpec, epp.dynSSZ)
 	if err != nil {
 		fmt.Println("error reading beaconStateTopLevelRoots")
 	}
@@ -427,8 +433,8 @@ func TestProveValidatorBalanceAgainstValidatorBalanceList(t *testing.T) {
 	validatorIndex := phase0.ValidatorIndex(REPOINTED_VALIDATOR_INDEX)
 	proof, _ := beacon.ProveValidatorBalanceAgainstValidatorBalanceList(oracleState.Balances, uint64(validatorIndex))
 
-	beaconStateTopLevelRoots, _ := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState)
-	root := beaconStateTopLevelRoots.BalancesRoot
+	beaconStateTopLevelRoots, _ := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState, epp.networkSpec, epp.dynSSZ)
+	root := beaconStateTopLevelRoots.Deneb.BalancesRoot
 
 	balanceRootList, err := beacon.GetBalanceRoots(oracleState.Balances)
 	if err != nil {
@@ -449,7 +455,7 @@ func TestProveValidatorBalanceAgainstValidatorBalanceList(t *testing.T) {
 func TestProveBeaconTopLevelRootAgainstBeaconState(t *testing.T) {
 
 	// get the oracle state root for a merkle tree with top level roots as the leaves
-	beaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState)
+	beaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState, epp.networkSpec, epp.dynSSZ)
 	if err != nil {
 		fmt.Println("error")
 	}
@@ -468,7 +474,7 @@ func TestProveBeaconTopLevelRootAgainstBeaconState(t *testing.T) {
 
 	// validation of the proof
 	// get the leaf denoting the validatorsRoot in the BeaconStateRoot Merkle tree
-	leaf := beaconStateTopLevelRoots.ValidatorsRoot
+	leaf := beaconStateTopLevelRoots.Deneb.ValidatorsRoot
 	flag := epgcommon.ValidateProof(beaconStateRoot, validatorsRootProof, *leaf, beacon.ValidatorListIndex)
 	if flag != true {
 		fmt.Println("error")
@@ -508,10 +514,10 @@ func TestGetHistoricalSummariesBlockRootsProofProof(t *testing.T) {
 	ParseDenebBeaconStateFromJSON(*currentBeaconStateJSON, &currentBeaconState)
 	ParseDenebBeaconStateFromJSON(*oldBeaconStateJSON, &oldBeaconState)
 
-	currentBeaconStateTopLevelRoots, _ := beacon.ComputeBeaconStateTopLevelRootsDeneb(&currentBeaconState)
+	currentBeaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&currentBeaconState, epp.networkSpec, epp.dynSSZ)
 
 	if err != nil {
-		fmt.Println("error")
+		fmt.Println("error", err)
 	}
 
 	historicalSummaryIndex := uint64(271) //7421951 - FIRST_CAPELLA_SLOT_GOERLI // 8192
@@ -531,7 +537,7 @@ func TestGetHistoricalSummariesBlockRootsProofProof(t *testing.T) {
 	)
 
 	if err != nil {
-		fmt.Println("error")
+		fmt.Println("error", err)
 	}
 
 	currentBeaconStateRoot, _ := currentBeaconState.HashTreeRoot()
@@ -571,7 +577,7 @@ func TestGetHistoricalSummariesBlockRootsProofProofCapellaAgainstDeneb(t *testin
 	ParseDenebBeaconStateFromJSON(*currentBeaconStateJSON, &currentBeaconState)
 	ParseCapellaBeaconStateFromJSON(*oldBeaconStateJSON, &oldBeaconState)
 
-	currentBeaconStateTopLevelRoots, _ := beacon.ComputeBeaconStateTopLevelRootsDeneb(&currentBeaconState)
+	currentBeaconStateTopLevelRoots, _ := beacon.ComputeBeaconStateTopLevelRootsDeneb(&currentBeaconState, epp.networkSpec, epp.dynSSZ)
 	//oldBeaconStateTopLevelRoots, _ := ComputeBeaconStateTopLevelRoots(&oldBeaconState)
 
 	if err != nil {
@@ -629,13 +635,13 @@ func TestProveValidatorAgainstValidatorList(t *testing.T) {
 	}
 
 	// get the oracle state root for a merkle tree with top level roots as the leaves
-	beaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState)
+	beaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState, epp.networkSpec, epp.dynSSZ)
 	if err != nil {
 		fmt.Println("error")
 	}
 
 	// calling the proof verification func
-	flag := epgcommon.ValidateProof(*beaconStateTopLevelRoots.ValidatorsRoot, validatorProof, leaf, uint64(validatorIndex))
+	flag := epgcommon.ValidateProof(*beaconStateTopLevelRoots.Deneb.ValidatorsRoot, validatorProof, leaf, uint64(validatorIndex))
 	if flag != true {
 		fmt.Println("error")
 	}
@@ -706,7 +712,7 @@ func TestProveBlockBodyAgainstBlockHeader(t *testing.T) {
 func TestComputeExecutionPayloadHeader(t *testing.T) {
 
 	// get the proof for execution payload in the block body
-	beaconBlockBodyProof, _, err := beacon.ProveExecutionPayloadAgainstBlockBodyDeneb(block.Body)
+	beaconBlockBodyProof, _, err := beacon.ProveExecutionPayloadAgainstBlockBodyDeneb(block.Body, epp.networkSpec, epp.dynSSZ)
 	if err != nil {
 		fmt.Println("error", err)
 	}
@@ -769,7 +775,7 @@ func TestGetExecutionPayloadProof(t *testing.T) {
 
 	// get the proof for execution payload in the block body
 
-	executionPayloadProof, _, _ := beacon.ProveExecutionPayloadAgainstBlockHeaderDeneb(&blockHeader, block.Body)
+	executionPayloadProof, _, _ := beacon.ProveExecutionPayloadAgainstBlockHeaderDeneb(&blockHeader, block.Body, epp.networkSpec, epp.dynSSZ)
 
 	// get the hash root of the actual execution payload
 	var executionPayloadHashRoot, _ = block.Body.ExecutionPayload.HashTreeRoot()
@@ -917,7 +923,7 @@ func TestGetValidatorProof(t *testing.T) {
 	// picking up one random validator index
 	validatorIndex := uint64(VALIDATOR_INDEX)
 
-	beaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState)
+	beaconStateTopLevelRoots, err := beacon.ComputeBeaconStateTopLevelRootsDeneb(&oracleState, epp.networkSpec, epp.dynSSZ)
 	if err != nil {
 		fmt.Println("error reading beaconStateTopLevelRoots")
 	}

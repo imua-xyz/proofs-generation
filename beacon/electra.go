@@ -1,260 +1,23 @@
 package beacon
 
 import (
-	"fmt"
-
 	"github.com/Layr-Labs/eigenpod-proofs-generation/common"
 	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/altair"
-	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	ssz "github.com/ferranbt/fastssz"
 	dynssz "github.com/pk910/dynamic-ssz"
 )
 
-func ProveExecutionPayloadAgainstBlockHeaderDeneb(
-	blockHeader *phase0.BeaconBlockHeader,
-	withdrawalBeaconBlockBody *deneb.BeaconBlockBody,
-	networkSpec map[string]any,
-	dynSSZ *dynssz.DynSsz,
-) ([][32]byte, [32]byte, error) {
-	// prove block body root against block header
-	beaconBlockBodyAgainstBeaconBlockHeaderProof, err := ProveBlockBodyAgainstBlockHeader(blockHeader)
-	if err != nil {
-		return nil, [32]byte{}, err
-	}
-
-	// proof execution payload against the block body
-	executionPayloadAgainstBlockHeaderProof, executionPayloadRoot, err := ProveExecutionPayloadAgainstBlockBodyDeneb(
-		withdrawalBeaconBlockBody, networkSpec, dynSSZ,
-	)
-	if err != nil {
-		return nil, [32]byte{}, err
-	}
-
-	fullExecutionPayloadProof := append(executionPayloadAgainstBlockHeaderProof, beaconBlockBodyAgainstBeaconBlockHeaderProof...)
-	return fullExecutionPayloadProof, executionPayloadRoot, nil
-}
-
-// Refer to beaconblockbody.go in go-eth2-client
-// https://github.com/attestantio/go-eth2-client/blob/654ac05b4c534d96562329f988655e49e5743ff5/spec/bellatrix/beaconblockbody_encoding.go
-func ProveExecutionPayloadAgainstBlockBodyDeneb(
-	beaconBlockBody *deneb.BeaconBlockBody,
-	networkSpec map[string]any,
-	dynSSZ *dynssz.DynSsz,
-) (common.Proof, [32]byte, error) {
-	beaconBlockBodyContainerRoots := make([]phase0.Root, 12)
-	var err error
-
-	hh := dynssz.NewHasher()
-	//Field 0: RANDAOReveal
-	hh.PutBytes(beaconBlockBody.RANDAOReveal[:])
-	copy(beaconBlockBodyContainerRoots[0][:], hh.Hash())
-	hh.Reset()
-	//Field 1: ETH1Data
-	{
-		// ETH1Data is always fixed size so we can use fastssz directly.
-		if err = beaconBlockBody.ETH1Data.HashTreeRootWith(hh); err != nil {
-			return nil, [32]byte{}, err
-		}
-		copy(beaconBlockBodyContainerRoots[1][:], hh.Hash())
-	}
-	//Field 2: Graffiti
-	{
-		hh.PutBytes(beaconBlockBody.Graffiti[:])
-		copy(beaconBlockBodyContainerRoots[2][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 3: ProposerSlashings
-	{
-		maxSize, err := GetMaxProposerSlashings(networkSpec)
-		if err != nil {
-			return nil, [32]byte{}, err
-		}
-		subIndx := hh.Index()
-		num := uint64(len(beaconBlockBody.ProposerSlashings))
-		if num > maxSize {
-			err := ssz.ErrIncorrectListSize
-			return nil, [32]byte{}, err
-		}
-		for _, elem := range beaconBlockBody.ProposerSlashings {
-			// ProposerSlashing is not dependent on the spec.
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return nil, [32]byte{}, err
-			}
-		}
-		hh.MerkleizeWithMixin(subIndx, num, maxSize)
-		copy(beaconBlockBodyContainerRoots[3][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 4: AttesterSlashings
-	{
-		maxSize, err := GetMaxAttesterSlashings(networkSpec)
-		if err != nil {
-			return nil, [32]byte{}, err
-		}
-		subIndx := hh.Index()
-		num := uint64(len(beaconBlockBody.AttesterSlashings))
-		if num > maxSize {
-			err := ssz.ErrIncorrectListSize
-			return nil, [32]byte{}, err
-		}
-		for _, elem := range beaconBlockBody.AttesterSlashings {
-			// attester slashing is not dependent on the spec.
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return nil, [32]byte{}, err
-			}
-		}
-		hh.MerkleizeWithMixin(subIndx, num, maxSize)
-		copy(beaconBlockBodyContainerRoots[4][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 5: Attestations
-	{
-		maxSize, err := GetMaxAttestations(networkSpec)
-		if err != nil {
-			return nil, [32]byte{}, err
-		}
-		subIndx := hh.Index()
-		num := uint64(len(beaconBlockBody.Attestations))
-		if num > maxSize {
-			err := ssz.ErrIncorrectListSize
-			return nil, [32]byte{}, err
-		}
-		for _, elem := range beaconBlockBody.Attestations {
-			// attestation *is* dependent on the spec's MAX_VALIDATORS_PER_COMMITTEE
-			if err := dynSSZ.HashTreeRootWith(elem, hh); err != nil {
-				return nil, [32]byte{}, err
-			}
-		}
-		hh.MerkleizeWithMixin(subIndx, num, maxSize)
-		copy(beaconBlockBodyContainerRoots[5][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 6: Deposits
-	{
-		maxSize, err := GetMaxDeposits(networkSpec)
-		if err != nil {
-			return nil, [32]byte{}, err
-		}
-		subIndx := hh.Index()
-		num := uint64(len(beaconBlockBody.Deposits))
-		if num > maxSize {
-			err := ssz.ErrIncorrectListSize
-			return nil, [32]byte{}, err
-		}
-		for _, elem := range beaconBlockBody.Deposits {
-			// deposit *is* dependent on the spec's DEPOSIT_CONTRACT_TREE_DEPTH
-			if err = dynSSZ.HashTreeRootWith(elem, hh); err != nil {
-				return nil, [32]byte{}, err
-			}
-		}
-		hh.MerkleizeWithMixin(subIndx, num, maxSize)
-		copy(beaconBlockBodyContainerRoots[6][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 7: VoluntaryExits
-	{
-		maxSize, err := GetMaxVoluntaryExits(networkSpec)
-		if err != nil {
-			return nil, [32]byte{}, err
-		}
-		subIndx := hh.Index()
-		num := uint64(len(beaconBlockBody.VoluntaryExits))
-		if num > maxSize {
-			err := ssz.ErrIncorrectListSize
-			return nil, [32]byte{}, err
-		}
-		for _, elem := range beaconBlockBody.VoluntaryExits {
-			// voluntary exit is not dependent on the spec.
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return nil, [32]byte{}, err
-			}
-		}
-		hh.MerkleizeWithMixin(subIndx, num, maxSize)
-		copy(beaconBlockBodyContainerRoots[7][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 8: SyncAggregate
-	{
-		// syncAggregate *is* dependent on the spec's SYNC_COMMITTEE_SIZE
-		if err = dynSSZ.HashTreeRootWith(beaconBlockBody.SyncAggregate, hh); err != nil {
-			return nil, [32]byte{}, err
-		}
-		copy(beaconBlockBodyContainerRoots[8][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 9: ExecutionPayload
-	{
-		// ExecutionPayload *is* dependent on the spec
-		// MAX_EXTRA_DATA_BYTES, MAX_TRANSACTIONS_PER_PAYLOAD, MAX_WITHDRAWALS_PER_PAYLOAD
-		if err = dynSSZ.HashTreeRootWith(beaconBlockBody.ExecutionPayload, hh); err != nil {
-			return nil, [32]byte{}, err
-		}
-		copy(beaconBlockBodyContainerRoots[9][:], hh.Hash())
-	}
-
-	//Field 10: BLSToExecutionChanges
-	{
-		maxSize, err := GetMaxBLSToExecutionChanges(networkSpec)
-		if err != nil {
-			return nil, [32]byte{}, err
-		}
-		subIndx := hh.Index()
-		num := uint64(len(beaconBlockBody.BLSToExecutionChanges))
-		if num > maxSize {
-			err := ssz.ErrIncorrectListSize
-			return nil, [32]byte{}, err
-		}
-		for _, elem := range beaconBlockBody.BLSToExecutionChanges {
-			// BLSToExecutionChange is not dependent on the spec.
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return nil, [32]byte{}, err
-			}
-		}
-		hh.MerkleizeWithMixin(subIndx, num, maxSize)
-		copy(beaconBlockBodyContainerRoots[10][:], hh.Hash())
-		hh.Reset()
-	}
-
-	{
-		maxSize, err := GetMaxBlobCommitments(networkSpec)
-		if err != nil {
-			return nil, [32]byte{}, err
-		}
-		if size := len(beaconBlockBody.BlobKZGCommitments); size > maxSize {
-			err = ssz.ErrListTooBigFn("BeaconBlockBody.BlobKZGCommitments", size, maxSize)
-			return nil, [32]byte{}, err
-		}
-		subIndx := hh.Index()
-		for _, i := range beaconBlockBody.BlobKZGCommitments {
-			hh.PutBytes(i[:])
-		}
-		numItems := uint64(len(beaconBlockBody.BlobKZGCommitments))
-		hh.MerkleizeWithMixin(subIndx, numItems, uint64(maxSize))
-		copy(beaconBlockBodyContainerRoots[11][:], hh.Hash())
-		hh.Reset()
-	}
-
-	proof, err := common.GetProof(beaconBlockBodyContainerRoots, ExecutionPayloadIndex, BlockBodyMerkleSubtreeNumLayers)
-
-	return proof, beaconBlockBodyContainerRoots[ExecutionPayloadIndex], err
-}
-
-// taken from https://github.com/attestantio/go-eth2-client/blob/21f7dd480fed933d8e0b1c88cee67da721c80eb2/spec/deneb/beaconstate_ssz.go#L640
-func ComputeBeaconStateTopLevelRootsDeneb(
-	b *deneb.BeaconState, networkSpec map[string]any, dynSSZ *dynssz.DynSsz,
+// TODO: support dynamic-ssz
+// taken from https://github.com/attestantio/go-eth2-client/blob/4ee14baa752e16d5868d83fa559f1f7c7ffc198f/spec/electra/beaconstate_ssz.go#L780
+func ComputeBeaconStateTopLevelRootsElectra(
+	b *electra.BeaconState, networkSpec map[string]any, dynSSZ *dynssz.DynSsz,
 ) (*VersionedBeaconStateTopLevelRoots, error) {
 
 	var err error
-	beaconStateTopLevelRoots := &BeaconStateTopLevelRootsDeneb{}
+	beaconStateTopLevelRoots := &BeaconStateTopLevelRootsElectra{}
 
 	hh := dynssz.NewHasher()
 
@@ -712,179 +475,178 @@ func ComputeBeaconStateTopLevelRootsDeneb(
 		hh.Reset()
 	}
 
-	return &VersionedBeaconStateTopLevelRoots{
-		Deneb:   beaconStateTopLevelRoots,
-		Version: spec.DataVersionDeneb,
-	}, nil
-}
-
-func ComputeExecutionPayloadFieldRootsDeneb(
-	executionPayloadFields *deneb.ExecutionPayload,
-	networkSpec map[string]any,
-) ([]phase0.Root, error) {
-	executionPayloadFieldRoots := make([]phase0.Root, 17)
-	var retErr error
-
-	hh := ssz.NewHasher()
-
-	//Field 0: ParentHash
-	hh.PutBytes(executionPayloadFields.ParentHash[:])
-	copy(executionPayloadFieldRoots[0][:], hh.Hash())
+	// Field (28) 'DepositRequestsStartIndex'
+	hh.PutUint64(uint64(b.DepositRequestsStartIndex))
+	tmp28 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+	beaconStateTopLevelRoots.DepositRequestsStartIndexRoot = &tmp28
 	hh.Reset()
 
-	//Field 1: FeeRecipient
-	hh.PutBytes(executionPayloadFields.FeeRecipient[:])
-	copy(executionPayloadFieldRoots[1][:], hh.Hash())
+	// Field (29) 'DepositBalanceToConsume'
+	hh.PutUint64(uint64(b.DepositBalanceToConsume))
+	tmp29 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+	beaconStateTopLevelRoots.DepositBalanceToConsumeRoot = &tmp29
 	hh.Reset()
 
-	//Field 2: StateRoot
-	hh.PutBytes(executionPayloadFields.StateRoot[:])
-	copy(executionPayloadFieldRoots[2][:], hh.Hash())
+	// Field (30) 'ExitBalanceToConsume'
+	hh.PutUint64(uint64(b.ExitBalanceToConsume))
+	tmp30 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+	beaconStateTopLevelRoots.ExitBalanceToConsumeRoot = &tmp30
 	hh.Reset()
 
-	//Field 3: ReceiptRoot
-	hh.PutBytes(executionPayloadFields.ReceiptsRoot[:])
-	copy(executionPayloadFieldRoots[3][:], hh.Hash())
+	// Field (31) 'EarliestExitEpoch'
+	hh.PutUint64(uint64(b.EarliestExitEpoch))
+	tmp31 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+	beaconStateTopLevelRoots.EarliestExitEpochRoot = &tmp31
 	hh.Reset()
 
-	//Field 4: LogsBloom
-	hh.PutBytes(executionPayloadFields.LogsBloom[:])
-	copy(executionPayloadFieldRoots[4][:], hh.Hash())
+	// Field (32) 'ConsolidationBalanceToConsume'
+	hh.PutUint64(uint64(b.ConsolidationBalanceToConsume))
+	tmp32 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+	beaconStateTopLevelRoots.ConsolidationBalanceToConsumeRoot = &tmp32
 	hh.Reset()
 
-	//Field 5: PrevRandao
-	hh.PutBytes(executionPayloadFields.PrevRandao[:])
-	copy(executionPayloadFieldRoots[5][:], hh.Hash())
+	// Field (33) 'EarliestConsolidationEpoch'
+	hh.PutUint64(uint64(b.EarliestConsolidationEpoch))
+	tmp33 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+	beaconStateTopLevelRoots.EarliestConsolidationEpochRoot = &tmp33
 	hh.Reset()
 
-	//Field 6: BlockNumber
-	hh.PutUint64(executionPayloadFields.BlockNumber)
-	copy(executionPayloadFieldRoots[6][:], hh.Hash())
-	hh.Reset()
-
-	//Field 7: GasLimit
-	hh.PutUint64(executionPayloadFields.GasLimit)
-	copy(executionPayloadFieldRoots[7][:], hh.Hash())
-	hh.Reset()
-
-	//Field 8: GasUsed
-	hh.PutUint64(executionPayloadFields.GasUsed)
-	copy(executionPayloadFieldRoots[8][:], hh.Hash())
-	hh.Reset()
-
-	//Field 9: Timestamp
-	hh.PutUint64(executionPayloadFields.Timestamp)
-	copy(executionPayloadFieldRoots[9][:], hh.Hash())
-	hh.Reset()
-
-	//Field 10: ExtraData
-
-	// //If the field is empty, we set it to 0
-	// if len(executionPayloadFields.ExtraData) == 0 {
-	// 	executionPayloadFields.ExtraData = []byte{0}
-	// }
-
+	// Field (34) 'PendingDeposits'
 	{
-		maxSize, err := GetMaxExtraDataBytes(networkSpec)
-		if err != nil {
-			retErr = err
-			fmt.Println(err)
-		}
-		elemIndx := hh.Index()
-		byteLen := uint64(len(executionPayloadFields.ExtraData))
-		if byteLen > maxSize {
-			retErr = ssz.ErrIncorrectListSize
-			fmt.Println(retErr)
-		}
-		hh.PutBytes(executionPayloadFields.ExtraData)
-		// the number of 32-byte chunks, rounded up.
-		hh.MerkleizeWithMixin(elemIndx, byteLen, (maxSize+31)/32)
-		copy(executionPayloadFieldRoots[10][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 11: BaseFeePerGas
-	baseFeePerGas := make([]byte, 32)
-	baseFeePerGasBE := executionPayloadFields.BaseFeePerGas.Bytes32()
-	// reverse the endian-ness to little
-	for i := 0; i < 32; i++ {
-		baseFeePerGas[i] = baseFeePerGasBE[31-i]
-	}
-	hh.PutBytes(baseFeePerGas)
-	copy(executionPayloadFieldRoots[11][:], hh.Hash())
-	hh.Reset()
-
-	//Field 12: BlockHash
-	hh.PutBytes(executionPayloadFields.BlockHash[:])
-	copy(executionPayloadFieldRoots[12][:], hh.Hash())
-	hh.Reset()
-
-	//Field 13: Transactions
-	{
-		maxNumber, err := GetMaxTransactions(networkSpec)
-		if err != nil {
-			retErr = err
-			fmt.Println(err)
-		}
 		subIndx := hh.Index()
-		num := uint64(len(executionPayloadFields.Transactions))
-		if num > maxNumber {
-			retErr = ssz.ErrIncorrectListSize
-			fmt.Println(retErr)
-		}
-		maxSizeTransaction, err := GetMaxBytesPerTransaction(networkSpec)
-		if err != nil {
-			retErr = err
-			fmt.Println(err)
-		}
-		for _, elem := range executionPayloadFields.Transactions {
-			{
-				elemIndx := hh.Index()
-				byteLen := uint64(len(elem))
-				if byteLen > maxSizeTransaction {
-					retErr = ssz.ErrIncorrectListSize
-					fmt.Println(retErr)
-				}
-				hh.AppendBytes32(elem)
-				hh.MerkleizeWithMixin(elemIndx, byteLen, (maxSizeTransaction+31)/32)
-			}
-		}
-		hh.MerkleizeWithMixin(subIndx, num, maxNumber)
-		copy(executionPayloadFieldRoots[13][:], hh.Hash())
-		hh.Reset()
-	}
-
-	//Field 14: Withdrawals
-	{
-		maxSize, err := GetMaxWithdrawals(networkSpec)
-		if err != nil {
-			retErr = err
-			fmt.Println(err)
-		}
-		subIndx := hh.Index()
-		num := uint64(len(executionPayloadFields.Withdrawals))
-		if num > maxSize {
-			err := ssz.ErrIncorrectListSize
+		num := uint64(len(b.PendingDeposits))
+		if num > 134217728 {
+			err = ssz.ErrIncorrectListSize
 			return nil, err
 		}
-		for _, elem := range executionPayloadFields.Withdrawals {
+		for _, elem := range b.PendingDeposits {
+			if err = elem.HashTreeRootWith(hh); err != nil {
+				return nil, err
+			}
+		}
+		hh.MerkleizeWithMixin(subIndx, num, 134217728)
+		tmp34 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingDepositsRoot = &tmp34
+		hh.Reset()
+	}
+
+	// Field (35) 'PendingPartialWithdrawals'
+	{
+		subIndx := hh.Index()
+		num := uint64(len(b.PendingPartialWithdrawals))
+		if num > 134217728 {
+			err = ssz.ErrIncorrectListSize
+			return nil, err
+		}
+		for _, elem := range b.PendingPartialWithdrawals {
+			if err = elem.HashTreeRootWith(hh); err != nil {
+				return nil, err
+			}
+		}
+		hh.MerkleizeWithMixin(subIndx, num, 134217728)
+		tmp35 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingPartialWithdrawalsRoot = &tmp35
+		hh.Reset()
+	}
+
+	// Field (36) 'PendingConsolidations'
+	{
+		subIndx := hh.Index()
+		num := uint64(len(b.PendingConsolidations))
+		if num > 262144 {
+			err = ssz.ErrIncorrectListSize
+			return nil, err
+		}
+		for _, elem := range b.PendingConsolidations {
+			if err = elem.HashTreeRootWith(hh); err != nil {
+				return nil, err
+			}
+		}
+		hh.MerkleizeWithMixin(subIndx, num, 262144)
+		tmp36 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingConsolidationsRoot = &tmp36
+		hh.Reset()
+	}
+
+	// Field (37) `PendingDeposits`
+	{
+		maxSize, err := GetPendingDepositsLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		subIndx := hh.Index()
+		num := len(b.PendingDeposits)
+		if num > maxSize {
+			err = ssz.ErrIncorrectListSize
+			return nil, err
+		}
+		for _, elem := range b.PendingDeposits {
+			// check length of withdrawal credentials
+			if len(elem.WithdrawalCredentials) != 32 {
+				err = ssz.ErrIncorrectListSize
+				return nil, err
+			}
 			// not dependent on the spec
 			if err = elem.HashTreeRootWith(hh); err != nil {
 				return nil, err
 			}
 		}
-		hh.MerkleizeWithMixin(subIndx, num, maxSize)
-		copy(executionPayloadFieldRoots[14][:], hh.Hash())
+		hh.MerkleizeWithMixin(subIndx, uint64(num), uint64(maxSize))
+		tmp37 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingDepositsRoot = &tmp37
 		hh.Reset()
 	}
 
-	hh.PutUint64(executionPayloadFields.BlobGasUsed)
-	copy(executionPayloadFieldRoots[15][:], hh.Hash())
-	hh.Reset()
+	// Field (38) `PendingPartialWithdrawals`
+	{
+		maxSize, err := GetPendingPartialWithdrawalsLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		subIndx := hh.Index()
+		num := len(b.PendingPartialWithdrawals)
+		if num > maxSize {
+			err = ssz.ErrIncorrectListSize
+			return nil, err
+		}
+		for _, elem := range b.PendingPartialWithdrawals {
+			// not dependent on the spec
+			if err = elem.HashTreeRootWith(hh); err != nil {
+				return nil, err
+			}
+		}
+		hh.MerkleizeWithMixin(subIndx, uint64(num), uint64(maxSize))
+		tmp38 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingPartialWithdrawalsRoot = &tmp38
+		hh.Reset()
+	}
 
-	hh.PutUint64(executionPayloadFields.ExcessBlobGas)
-	copy(executionPayloadFieldRoots[16][:], hh.Hash())
-	hh.Reset()
+	// Field (39) `PendingConsolidations`
+	{
+		maxSize, err := GetPendingConsolidationsLimit(networkSpec)
+		if err != nil {
+			return nil, err
+		}
+		subIndx := hh.Index()
+		num := len(b.PendingConsolidations)
+		if num > maxSize {
+			err = ssz.ErrIncorrectListSize
+			return nil, err
+		}
+		for _, elem := range b.PendingConsolidations {
+			// not dependent on the spec
+			if err = elem.HashTreeRootWith(hh); err != nil {
+				return nil, err
+			}
+		}
+		hh.MerkleizeWithMixin(subIndx, uint64(num), uint64(maxSize))
+		tmp39 := phase0.Root(common.ConvertTo32ByteArray(hh.Hash()))
+		beaconStateTopLevelRoots.PendingConsolidationsRoot = &tmp39
+		hh.Reset()
+	}
 
-	return executionPayloadFieldRoots, retErr
+	return &VersionedBeaconStateTopLevelRoots{
+		Version: spec.DataVersionElectra,
+		Electra: beaconStateTopLevelRoots,
+	}, nil
 }

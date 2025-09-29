@@ -11,6 +11,8 @@ import (
 
 	beacon "github.com/Layr-Labs/eigenpod-proofs-generation/beacon"
 	"github.com/Layr-Labs/eigenpod-proofs-generation/common"
+	fastssz "github.com/ferranbt/fastssz"
+	dynssz "github.com/pk910/dynamic-ssz"
 )
 
 const (
@@ -23,18 +25,21 @@ const (
 type EigenPodProofs struct {
 	chainID                       uint64
 	oracleStateRootCache          *expirable.LRU[uint64, phase0.Root]
-	oracleStateTopLevelRootsCache *expirable.LRU[uint64, *beacon.BeaconStateTopLevelRoots]
+	oracleStateTopLevelRootsCache *expirable.LRU[uint64, *beacon.VersionedBeaconStateTopLevelRoots]
 	oracleStateValidatorTreeCache *expirable.LRU[uint64, [][]phase0.Root]
 	oracleStateCacheExpirySeconds int
+	networkSpec                   map[string]any
+	hashRooter                    func(source any) ([32]byte, error)
+	dynSSZ                        *dynssz.DynSsz
 }
 
 func NewEigenPodProofs(chainID uint64, oracleStateCacheExpirySeconds int) (*EigenPodProofs, error) {
-	if chainID != 1 && chainID != 5 && chainID != 17000 {
+	if chainID != 1 && chainID != 5 && chainID != 17000 && chainID != 31337 && chainID != 560048 {
 		return nil, errors.New("chainID not supported")
 	}
 
 	oracleStateRootCache := expirable.NewLRU[uint64, phase0.Root](MAX_ORACLE_STATE_CACHE_SIZE, nil, time.Duration(oracleStateCacheExpirySeconds)*time.Second)
-	oracleStateTopLevelRootsCache := expirable.NewLRU[uint64, *beacon.BeaconStateTopLevelRoots](MAX_ORACLE_STATE_CACHE_SIZE, nil, time.Duration(oracleStateCacheExpirySeconds)*time.Second)
+	oracleStateTopLevelRootsCache := expirable.NewLRU[uint64, *beacon.VersionedBeaconStateTopLevelRoots](MAX_ORACLE_STATE_CACHE_SIZE, nil, time.Duration(oracleStateCacheExpirySeconds)*time.Second)
 	oracleStateValidatorTreeCache := expirable.NewLRU[uint64, [][]phase0.Root](MAX_ORACLE_STATE_CACHE_SIZE, nil, time.Duration(oracleStateCacheExpirySeconds)*time.Second)
 
 	return &EigenPodProofs{
@@ -43,6 +48,13 @@ func NewEigenPodProofs(chainID uint64, oracleStateCacheExpirySeconds int) (*Eige
 		oracleStateTopLevelRootsCache: oracleStateTopLevelRootsCache,
 		oracleStateValidatorTreeCache: oracleStateValidatorTreeCache,
 		oracleStateCacheExpirySeconds: oracleStateCacheExpirySeconds,
+		// default hasher, if a spec is not provided.
+		hashRooter: func(source any) ([32]byte, error) {
+			if hashable, ok := source.(fastssz.HashRoot); ok {
+				return hashable.HashTreeRoot()
+			}
+			return phase0.Root{}, errors.New("object does not support hashing")
+		},
 	}, nil
 }
 
@@ -50,7 +62,7 @@ func (epp *EigenPodProofs) ComputeBeaconStateRoot(beaconState *deneb.BeaconState
 	beaconStateRoot, err := epp.loadOrComputeBeaconStateRoot(
 		beaconState.Slot,
 		func() (phase0.Root, error) {
-			stateRoot, err := beaconState.HashTreeRoot()
+			stateRoot, err := epp.hashRooter(beaconState)
 			if err != nil {
 				return phase0.Root{}, err
 			}
@@ -64,7 +76,7 @@ func (epp *EigenPodProofs) ComputeBeaconStateRoot(beaconState *deneb.BeaconState
 	return beaconStateRoot, nil
 }
 
-func (epp *EigenPodProofs) ComputeBeaconStateTopLevelRoots(beaconState *spec.VersionedBeaconState) (*beacon.BeaconStateTopLevelRoots, error) {
+func (epp *EigenPodProofs) ComputeBeaconStateTopLevelRoots(beaconState *spec.VersionedBeaconState) (*beacon.VersionedBeaconStateTopLevelRoots, error) {
 	//get the versioned beacon state's slot
 	slot, err := beaconState.Slot()
 	if err != nil {
@@ -73,7 +85,7 @@ func (epp *EigenPodProofs) ComputeBeaconStateTopLevelRoots(beaconState *spec.Ver
 
 	beaconStateTopLevelRoots, err := epp.loadOrComputeBeaconStateTopLevelRoots(
 		slot,
-		func() (*beacon.BeaconStateTopLevelRoots, error) {
+		func() (*beacon.VersionedBeaconStateTopLevelRoots, error) {
 			beaconStateTopLevelRoots, err := epp.ComputeVersionedBeaconStateTopLevelRoots(beaconState)
 			if err != nil {
 				return nil, err
@@ -87,12 +99,14 @@ func (epp *EigenPodProofs) ComputeBeaconStateTopLevelRoots(beaconState *spec.Ver
 	return beaconStateTopLevelRoots, err
 }
 
-func (epp *EigenPodProofs) ComputeVersionedBeaconStateTopLevelRoots(beaconState *spec.VersionedBeaconState) (*beacon.BeaconStateTopLevelRoots, error) {
+func (epp *EigenPodProofs) ComputeVersionedBeaconStateTopLevelRoots(beaconState *spec.VersionedBeaconState) (*beacon.VersionedBeaconStateTopLevelRoots, error) {
 	switch beaconState.Version {
+	case spec.DataVersionElectra:
+		return beacon.ComputeBeaconStateTopLevelRootsElectra(beaconState.Electra, epp.networkSpec, epp.dynSSZ)
 	case spec.DataVersionDeneb:
-		return beacon.ComputeBeaconStateTopLevelRootsDeneb(beaconState.Deneb)
+		return beacon.ComputeBeaconStateTopLevelRootsDeneb(beaconState.Deneb, epp.networkSpec, epp.dynSSZ)
 	case spec.DataVersionCapella:
-		return beacon.ComputeBeaconStateTopLevelRootsCapella(beaconState.Capella)
+		return beacon.ComputeBeaconStateTopLevelRootsCapella(beaconState.Capella, epp.networkSpec)
 	default:
 		return nil, errors.New("unsupported beacon state version")
 	}
@@ -142,7 +156,7 @@ func (epp *EigenPodProofs) loadOrComputeBeaconStateRoot(slot phase0.Slot, getDat
 	return root, nil
 }
 
-func (epp *EigenPodProofs) loadOrComputeBeaconStateTopLevelRoots(slot phase0.Slot, getData func() (*beacon.BeaconStateTopLevelRoots, error)) (*beacon.BeaconStateTopLevelRoots, error) {
+func (epp *EigenPodProofs) loadOrComputeBeaconStateTopLevelRoots(slot phase0.Slot, getData func() (*beacon.VersionedBeaconStateTopLevelRoots, error)) (*beacon.VersionedBeaconStateTopLevelRoots, error) {
 	topLevelRoots, found := epp.oracleStateTopLevelRootsCache.Get(uint64(slot))
 	if found {
 		return topLevelRoots, nil
@@ -174,4 +188,17 @@ func (epp *EigenPodProofs) loadOrComputeValidatorTree(slot phase0.Slot, getData 
 	// cache the beacon state root
 	epp.oracleStateValidatorTreeCache.Add(uint64(slot), validatorTree)
 	return validatorTree, nil
+}
+
+func (epp *EigenPodProofs) WithNetworkSpec(networkSpec map[string]interface{}) *EigenPodProofs {
+	epp.networkSpec = networkSpec
+	epp.dynSSZ = dynssz.NewDynSsz(networkSpec)
+	epp.hashRooter = func(source any) ([32]byte, error) {
+		return epp.dynSSZ.HashTreeRoot(source)
+	}
+	return epp
+}
+
+func (epp *EigenPodProofs) HashTreeRoot(source any) ([32]byte, error) {
+	return epp.hashRooter(source)
 }

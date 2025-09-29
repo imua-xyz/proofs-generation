@@ -189,5 +189,7 @@ func ValidateProof(root phase0.Root, proof [][32]byte, element phase0.Root, inde
 		layer_index = layer_index / 2
 	}
 
-	return target_hash == root
+	res := target_hash == root
+
+	return res
 }

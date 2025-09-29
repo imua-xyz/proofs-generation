@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	beacon "github.com/Layr-Labs/eigenpod-proofs-generation/beacon"
 	"github.com/Layr-Labs/eigenpod-proofs-generation/common"
@@ -244,7 +245,12 @@ func GetValidatorFields(v *phase0.Validator) []string {
 	return validatorFields
 }
 
-func ProveValidatorFields(epp *EigenPodProofs, oracleBlockHeader *phase0.BeaconBlockHeader, oracleBeaconState *spec.VersionedBeaconState, validatorIndex uint64) (*StateRootProof, common.Proof, error) {
+func ProveValidatorFields(
+	epp *EigenPodProofs,
+	oracleBlockHeader *phase0.BeaconBlockHeader,
+	oracleBeaconState *spec.VersionedBeaconState,
+	validatorIndex uint64,
+) (*StateRootProof, common.Proof, error) {
 	oracleBeaconStateSlot, err := oracleBeaconState.Slot()
 	if err != nil {
 		return nil, nil, err
@@ -263,9 +269,6 @@ func ProveValidatorFields(epp *EigenPodProofs, oracleBlockHeader *phase0.BeaconB
 
 	// Get beacon state root. TODO: Combine this cheaply with compute beacon state top level roots
 	stateRootProof.BeaconStateRoot = oracleBlockHeader.StateRoot
-	if err != nil {
-		return nil, nil, err
-	}
 
 	stateRootProof.StateRootProof, err = beacon.ProveStateRootAgainstBlockHeader(oracleBlockHeader)
 
@@ -378,6 +381,106 @@ func ParseDenebStateJSONFile(filePath string) (*beaconStateJSONDeneb, error) {
 
 	actualData := beaconState.Data
 	return &actualData, nil
+}
+
+// ParseSpecFile reads a spec.json and parses it. Since there is no spec type yet defined, it
+// does some manual processing. The spec must be downloaded as follow:
+// curl -s $BEACON_API_URL/eth/v1/config/spec | jq .data > spec.json
+func ParseSpecJSONFile(filePath string, res map[string]any) error {
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		log.Debug().Str("file", filePath).Msgf("error with reading file: %v", err)
+		return err
+	}
+	var unmarshalAsString map[string]string
+	if err := json.Unmarshal(data, &unmarshalAsString); err != nil {
+		log.Debug().Msgf("error with JSON unmarshalling: %v", err)
+		return err
+	}
+	if res == nil {
+		return errors.New("res is nil")
+	}
+	// copied from spec.go in go-eth2-client/http
+	for k, v := range unmarshalAsString {
+		// Handle domains.
+		if strings.HasPrefix(k, "DOMAIN_") {
+			byteVal, err := hex.DecodeString(strings.TrimPrefix(v, "0x"))
+			if err == nil {
+				var domainType phase0.DomainType
+				copy(domainType[:], byteVal)
+				res[k] = domainType
+				continue
+			}
+		}
+		// Handle fork versions.
+		if strings.HasSuffix(k, "_FORK_VERSION") {
+			byteVal, err := hex.DecodeString(strings.TrimPrefix(v, "0x"))
+			if err == nil {
+				var version phase0.Version
+				copy(version[:], byteVal)
+				res[k] = version
+				continue
+			}
+		}
+		// Handle hex strings.
+		if strings.HasPrefix(v, "0x") {
+			byteVal, err := hex.DecodeString(strings.TrimPrefix(v, "0x"))
+			if err == nil {
+				res[k] = byteVal
+				continue
+			}
+		}
+		// Handle times.
+		if strings.HasSuffix(k, "_TIME") {
+			intVal, err := strconv.ParseInt(v, 10, 64)
+			if err == nil && intVal != 0 {
+				res[k] = time.Unix(intVal, 0)
+				continue
+			}
+		}
+		// Handle durations.
+		if strings.HasPrefix(k, "SECONDS_PER_") || k == "GENESIS_DELAY" {
+			intVal, err := strconv.ParseUint(v, 10, 64)
+			if err == nil && intVal != 0 {
+				res[k] = time.Duration(intVal) * time.Second
+				continue
+			}
+		}
+		// Handle integers.
+		if v == "0" {
+			res[k] = uint64(0)
+			continue
+		}
+		intVal, err := strconv.ParseUint(v, 10, 64)
+		if err == nil && intVal != 0 {
+			res[k] = intVal
+			continue
+		}
+		// assume it is a string
+		res[k] = v
+	}
+	// The application mask domain type is not provided by all nodes, so add it here if not present.
+	if _, exists := res["DOMAIN_APPLICATION_MASK"]; !exists {
+		res["DOMAIN_APPLICATION_MASK"] = phase0.DomainType{0x00, 0x00, 0x00, 0x01}
+	}
+	// The BLS to execution change domain type is not provided by all nodes, so add it here if not present.
+	if _, exists := res["DOMAIN_BLS_TO_EXECUTION_CHANGE"]; !exists {
+		res["DOMAIN_BLS_TO_EXECUTION_CHANGE"] = phase0.DomainType{0x0a, 0x00, 0x00, 0x00}
+	}
+	// The builder application domain type is not officially part of the spec, so add it here if not present.
+	if _, exists := res["DOMAIN_APPLICATION_BUILDER"]; !exists {
+		res["DOMAIN_APPLICATION_BUILDER"] = phase0.DomainType{0x00, 0x00, 0x00, 0x01}
+	}
+	if _, exists := res["MAX_TRANSACTIONS_PER_PAYLOAD"]; !exists {
+		res["MAX_TRANSACTIONS_PER_PAYLOAD"] = 1048576
+	}
+	if _, exists := res["MAX_BYTES_PER_TRANSACTION"]; !exists {
+		res["MAX_BYTES_PER_TRANSACTION"] = 1073741824
+	}
+	if _, exists := res["MAX_BLOB_COMMITMENTS_PER_BLOCK"]; !exists {
+		res["MAX_BLOB_COMMITMENTS_PER_BLOCK"] = 4096
+	}
+	return nil
 }
 
 func ParseCapellaStateJSONFile(filePath string) (*beaconStateJSONCapella, error) {

@@ -21,6 +21,7 @@ func main() {
 	validatorIndex := flag.Uint64("validatorIndex", 0, "validatorIndex")
 	outputFile := flag.String("outputFile", "", "Output file")
 	chainID := flag.Uint64("chainID", 0, "Chain ID")
+	specFile := flag.String("specFile", "", "Spec file")
 
 	//WithdrawaProof specific flags
 	historicalSummariesIndex := flag.Uint64("historicalSummariesIndex", 0, "Historical summaries index")
@@ -43,13 +44,21 @@ func main() {
 	// Handling commands based on the 'command' flag
 	switch *command {
 	case "ValidatorFieldsProof":
-		err = GenerateValidatorFieldsProof(*oracleBlockHeaderFile, *stateFile, *validatorIndex, *chainID, *outputFile)
+		err = GenerateValidatorFieldsProof(
+			*specFile, *oracleBlockHeaderFile, *stateFile, *validatorIndex, *chainID, *outputFile,
+		)
 
 	case "WithdrawalFieldsProof":
-		err = GenerateWithdrawalFieldsProof(*oracleBlockHeaderFile, *stateFile, *historicalSummaryStateFile, *blockHeaderFile, *blockBodyFile, *validatorIndex, *withdrawalIndex, *historicalSummariesIndex, *blockHeaderIndex, *chainID, *outputFile)
+		err = GenerateWithdrawalFieldsProof(
+			*specFile, *oracleBlockHeaderFile, *stateFile, *historicalSummaryStateFile,
+			*blockHeaderFile, *blockBodyFile, *validatorIndex, *withdrawalIndex,
+			*historicalSummariesIndex, *blockHeaderIndex, *chainID, *outputFile,
+		)
 
 	case "BalanceUpdateProof":
-		err = GenerateBalanceUpdateProof(*oracleBlockHeaderFile, *stateFile, *validatorIndex, *chainID, *outputFile)
+		err = GenerateBalanceUpdateProof(
+			*specFile, *oracleBlockHeaderFile, *stateFile, *validatorIndex, *chainID, *outputFile,
+		)
 
 	default:
 		log.Debug().Str("Unknown command:", *command)
