@@ -9,7 +9,6 @@ import (
 	"time"
 
 	eigenpodproofs "github.com/Layr-Labs/eigenpod-proofs-generation"
-	"github.com/Layr-Labs/eigenpod-proofs-generation/beacon"
 	commonutils "github.com/Layr-Labs/eigenpod-proofs-generation/common_utils"
 	eth2client "github.com/attestantio/go-eth2-client"
 	"github.com/attestantio/go-eth2-client/api"
@@ -85,6 +84,43 @@ func NewProofServer(chainId uint64, provider string) *ProofServer {
 	return &server
 }
 
+// Helper function to extract common fields from any post-Deneb beacon state
+// This automatically works with any future consensus version (Deneb, Electra, Fulu, etc.)
+// Note: Only the timestamp extraction requires a switch statement as it's not available as a method.
+// When go-eth2-client adds a Timestamp() method, even this can be removed.
+func extractBeaconStateFields(versionedState *spec.VersionedBeaconState) (validators []*phase0.Validator, timestamp uint64, err error) {
+	// Use built-in Validators() method - works for all versions automatically!
+	validators, err = versionedState.Validators()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get validators: %w", err)
+	}
+
+	// For timestamp, we need to access the LatestExecutionPayloadHeader
+	// All post-Deneb versions have this field in their BeaconState
+	// NOTE: This switch is the ONLY place that needs updating for new versions
+	switch versionedState.Version {
+	case spec.DataVersionDeneb:
+		if versionedState.Deneb == nil || versionedState.Deneb.LatestExecutionPayloadHeader == nil {
+			return nil, 0, errors.New("latest execution payload header not found")
+		}
+		timestamp = versionedState.Deneb.LatestExecutionPayloadHeader.Timestamp
+	case spec.DataVersionElectra:
+		if versionedState.Electra == nil || versionedState.Electra.LatestExecutionPayloadHeader == nil {
+			return nil, 0, errors.New("latest execution payload header not found")
+		}
+		timestamp = versionedState.Electra.LatestExecutionPayloadHeader.Timestamp
+	case spec.DataVersionFulu:
+		if versionedState.Fulu == nil || versionedState.Fulu.LatestExecutionPayloadHeader == nil {
+			return nil, 0, errors.New("latest execution payload header not found")
+		}
+		timestamp = versionedState.Fulu.LatestExecutionPayloadHeader.Timestamp
+	default:
+		return nil, 0, fmt.Errorf("unsupported version: %s", versionedState.Version)
+	}
+
+	return validators, timestamp, nil
+}
+
 func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProofRequest) (*ValidatorProofResponse, error) {
 	// TODO: check slot is after deneb fork
 
@@ -115,25 +151,21 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 		return nil, fmt.Errorf("error getting beacon state: %w", err)
 	}
 	versionedState = beaconStateResponse.Data
-	if versionedState.Deneb == nil && versionedState.Electra == nil {
-		return nil, errors.New("only post-Deneb chains are supported")
+	// Check if the beacon state version is at least Deneb (Deneb, Electra, Fulu, or later)
+	if versionedState.Version < spec.DataVersionDeneb {
+		return nil, fmt.Errorf("only post-Deneb chains are supported, got version: %s", versionedState.Version)
 	}
-	// TODO: maybe there is a better way to do this that doesn't involve repetition
-	electra := versionedState.Electra != nil
-	if electra {
-		if req.ValidatorIndex >= uint64(len(versionedState.Electra.Validators)) {
-			return nil, errors.New("validator index out of range")
-		}
-		if versionedState.Electra.LatestExecutionPayloadHeader == nil {
-			return nil, errors.New("latest execution payload header not found")
-		}
-	} else {
-		if req.ValidatorIndex >= uint64(len(versionedState.Deneb.Validators)) {
-			return nil, errors.New("validator index out of range")
-		}
-		if versionedState.Deneb.LatestExecutionPayloadHeader == nil {
-			return nil, errors.New("latest execution payload header not found")
-		}
+
+	// Extract validators and timestamp using helper function
+	// This automatically handles all post-Deneb versions
+	validators, timestamp, err := extractBeaconStateFields(versionedState)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate validator index
+	if req.ValidatorIndex >= uint64(len(validators)) {
+		return nil, errors.New("validator index out of range")
 	}
 
 	epp, err := eigenpodproofs.NewEigenPodProofs(s.chainId, 1000)
@@ -149,161 +181,14 @@ func (s *ProofServer) GetValidatorProof(ctx context.Context, req *ValidatorProof
 		return nil, err
 	}
 
-	if !electra {
-		return &ValidatorProofResponse{
-			StateRoot:               "0x" + hex.EncodeToString(beaconBlockHeader.StateRoot[:]),
-			StateRootProof:          commonutils.ConvertBytesToStrings(stateRootProof.StateRootProof.ToBytesSlice()),
-			ValidatorContainer:      commonutils.GetValidatorFields(versionedState.Deneb.Validators[req.ValidatorIndex]),
-			ValidatorContainerProof: commonutils.ConvertBytesToStrings(validatorContainerProof.ToBytesSlice()),
-			Slot:                    req.Slot,
-			ValidatorIndex:          req.ValidatorIndex,
-			Timestamp:               versionedState.Deneb.LatestExecutionPayloadHeader.Timestamp,
-		}, nil
-	}
-
+	// Build response using extracted data
 	return &ValidatorProofResponse{
 		StateRoot:               "0x" + hex.EncodeToString(beaconBlockHeader.StateRoot[:]),
 		StateRootProof:          commonutils.ConvertBytesToStrings(stateRootProof.StateRootProof.ToBytesSlice()),
-		ValidatorContainer:      commonutils.GetValidatorFields(versionedState.Electra.Validators[req.ValidatorIndex]),
+		ValidatorContainer:      commonutils.GetValidatorFields(validators[req.ValidatorIndex]),
 		ValidatorContainerProof: commonutils.ConvertBytesToStrings(validatorContainerProof.ToBytesSlice()),
 		Slot:                    req.Slot,
 		ValidatorIndex:          req.ValidatorIndex,
-		Timestamp:               versionedState.Electra.LatestExecutionPayloadHeader.Timestamp,
+		Timestamp:               timestamp,
 	}, nil
-}
-
-func (s *ProofServer) GetWithdrawalProof(ctx context.Context, req *WithdrawalProofRequest) (*WithdrawalProofResponse, error) {
-	var oracleBlockHeader *phase0.BeaconBlockHeader
-	var oracleState *spec.VersionedBeaconState
-	var withdrawalBlock *spec.VersionedSignedBeaconBlock
-	var completeTargetBlockRootsGroup []phase0.Root
-	var completeTargetBlockRootsGroupSlot uint64
-	var targetBlockRootsGroupSummaryIndex uint64
-	var withdrawalBlockRootIndexInGroup uint64
-	var historicalSummaryBlockRoot []byte
-	var withdrawalIndex uint64
-
-	beaconClient, cancel, err := NewBeaconClient(s.provider)
-	if err != nil {
-		return nil, err
-	}
-	defer cancel()
-
-	specResponse, err := beaconClient.specProvider.Spec(ctx, &api.SpecOpts{})
-	if err != nil {
-		return nil, err
-	}
-	networkSpec := specResponse.Data
-
-	epp, err := eigenpodproofs.NewEigenPodProofs(s.chainId, 1000)
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error creating EPP object", err)
-		return nil, err
-	}
-	epp = epp.
-		WithNetworkSpec(networkSpec)
-
-	targetBlockRootsGroupSummaryIndex, withdrawalBlockRootIndexInGroup, completeTargetBlockRootsGroupSlot, err = epp.GetWithdrawalProofParams(req.StateSlot, req.WithdrawalSlot)
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error getting withdrawal proof params", err)
-		return nil, err
-	}
-
-	blockHeaderResponse, err := beaconClient.blockHeaderProvider.BeaconBlockHeader(ctx, &api.BeaconBlockHeaderOpts{Block: strconv.FormatUint(req.StateSlot, 10)})
-	if err != nil {
-		return nil, err
-	}
-	oracleBlockHeader = blockHeaderResponse.Data.Header.Message
-
-	beaconStateResponse, err := beaconClient.stateProvider.BeaconState(ctx, &api.BeaconStateOpts{State: strconv.FormatUint(req.StateSlot, 10)})
-	if err != nil {
-		return nil, err
-	}
-	oracleState = beaconStateResponse.Data
-
-	blockResponse, err := beaconClient.blockProvider.SignedBeaconBlock(ctx, &api.SignedBeaconBlockOpts{Block: strconv.FormatUint(req.WithdrawalSlot, 10)})
-	if err != nil {
-		return nil, err
-	}
-	withdrawalBlock = blockResponse.Data
-
-	beaconStateResponse, err = beaconClient.stateProvider.BeaconState(ctx, &api.BeaconStateOpts{State: strconv.FormatUint(completeTargetBlockRootsGroupSlot, 10)})
-	if err != nil {
-		return nil, err
-	}
-	if beaconStateResponse.Data.Electra != nil {
-		completeTargetBlockRootsGroup = beaconStateResponse.Data.Electra.BlockRoots
-	} else {
-		completeTargetBlockRootsGroup = beaconStateResponse.Data.Deneb.BlockRoots
-	}
-
-	oracleStateContainerTopLevelRoots, err := epp.ComputeBeaconStateTopLevelRoots(oracleState)
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with ComputeBeaconStateTopLevelRoots", err)
-		return nil, err
-	}
-
-	withdrawalContainerProof, withdrawalContainer, err := epp.ProveWithdrawal(oracleBlockHeader, oracleState, oracleStateContainerTopLevelRoots, completeTargetBlockRootsGroup, withdrawalBlock, req.ValidatorIndex)
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with ProveWithdrawal", err)
-		return nil, err
-	}
-
-	withdrawalContainerBytes := make([][]byte, len(withdrawalContainer))
-	for i, withdrawal := range withdrawalContainer {
-		withdrawalContainerBytes[i] = make([]byte, 32)
-		copy(withdrawalContainerBytes[i], withdrawal[:])
-	}
-
-	stateRootProofAgainstBlockHeader, err := beacon.ProveStateRootAgainstBlockHeader(oracleBlockHeader)
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with ProveStateRootAgainstBlockHeader", err)
-		return nil, err
-	}
-
-	validators, err := oracleState.Validators()
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with get validators", err)
-		return nil, err
-	}
-	validatorContainerProof, err := epp.ProveValidatorAgainstBeaconState(oracleStateContainerTopLevelRoots, phase0.Slot(req.StateSlot), validators, req.ValidatorIndex)
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with ProveValidatorAgainstBeaconState", err)
-		return nil, err
-	}
-
-	electra := oracleState.Electra != nil
-	var root [32]byte
-	if electra {
-		root, err = epp.HashTreeRoot(withdrawalBlock.Electra.Message)
-	} else {
-		root, err = epp.HashTreeRoot(withdrawalBlock.Deneb.Message)
-	}
-	if err != nil {
-		log.Debug().AnErr("GenerateWithdrawalFieldsProof: error with get withdrawal block root", err)
-		return nil, err
-	}
-	historicalSummaryBlockRoot = root[:]
-
-	withdrawalIndex = withdrawalContainerProof.WithdrawalIndex
-
-	return &WithdrawalProofResponse{
-		StateRoot:                       "0x" + hex.EncodeToString(oracleBlockHeader.StateRoot[:]),
-		StateRootProof:                  commonutils.ConvertBytesToStrings(stateRootProofAgainstBlockHeader.ToBytesSlice()),
-		ValidatorContainer:              commonutils.GetValidatorFields(validators[req.ValidatorIndex]),
-		ValidatorContainerProof:         commonutils.ConvertBytesToStrings(validatorContainerProof.ToBytesSlice()),
-		HistoricalSummaryBlockRoot:      "0x" + hex.EncodeToString(historicalSummaryBlockRoot),
-		HistoricalSummaryBlockRootProof: commonutils.ConvertBytesToStrings(withdrawalContainerProof.HistoricalSummaryBlockRootProof.ToBytesSlice()),
-		SlotRoot:                        "0x" + hex.EncodeToString(withdrawalContainerProof.SlotRoot[:]),
-		SlotRootProof:                   commonutils.ConvertBytesToStrings(withdrawalContainerProof.SlotProof.ToBytesSlice()),
-		TimestampRoot:                   "0x" + hex.EncodeToString(withdrawalContainerProof.TimestampRoot[:]),
-		TimestampRootProof:              commonutils.ConvertBytesToStrings(withdrawalContainerProof.TimestampProof.ToBytesSlice()),
-		ExecutionPayloadRoot:            "0x" + hex.EncodeToString(withdrawalContainerProof.ExecutionPayloadRoot[:]),
-		ExecutionPayloadRootProof:       commonutils.ConvertBytesToStrings(withdrawalContainerProof.ExecutionPayloadProof.ToBytesSlice()),
-		WithdrawalContainer:             commonutils.ConvertBytesToStrings(withdrawalContainerBytes),
-		WithdrawalContainerProof:        commonutils.ConvertBytesToStrings(withdrawalContainerProof.WithdrawalProof.ToBytesSlice()),
-		HistoricalSummaryIndex:          targetBlockRootsGroupSummaryIndex,
-		BlockRootIndex:                  withdrawalBlockRootIndexInGroup,
-		WithdrawalIndexWithinBlock:      withdrawalIndex,
-	}, err
 }

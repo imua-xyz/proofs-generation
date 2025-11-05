@@ -19,8 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ProofService_GetValidatorProof_FullMethodName  = "/proof.ProofService/GetValidatorProof"
-	ProofService_GetWithdrawalProof_FullMethodName = "/proof.ProofService/GetWithdrawalProof"
+	ProofService_GetValidatorProof_FullMethodName = "/proof.ProofService/GetValidatorProof"
 )
 
 // ProofServiceClient is the client API for ProofService service.
@@ -28,7 +27,6 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProofServiceClient interface {
 	GetValidatorProof(ctx context.Context, in *ValidatorProofRequest, opts ...grpc.CallOption) (*ValidatorProofResponse, error)
-	GetWithdrawalProof(ctx context.Context, in *WithdrawalProofRequest, opts ...grpc.CallOption) (*WithdrawalProofResponse, error)
 }
 
 type proofServiceClient struct {
@@ -49,22 +47,11 @@ func (c *proofServiceClient) GetValidatorProof(ctx context.Context, in *Validato
 	return out, nil
 }
 
-func (c *proofServiceClient) GetWithdrawalProof(ctx context.Context, in *WithdrawalProofRequest, opts ...grpc.CallOption) (*WithdrawalProofResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(WithdrawalProofResponse)
-	err := c.cc.Invoke(ctx, ProofService_GetWithdrawalProof_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ProofServiceServer is the server API for ProofService service.
 // All implementations must embed UnimplementedProofServiceServer
 // for forward compatibility.
 type ProofServiceServer interface {
 	GetValidatorProof(context.Context, *ValidatorProofRequest) (*ValidatorProofResponse, error)
-	GetWithdrawalProof(context.Context, *WithdrawalProofRequest) (*WithdrawalProofResponse, error)
 	mustEmbedUnimplementedProofServiceServer()
 }
 
@@ -77,9 +64,6 @@ type UnimplementedProofServiceServer struct{}
 
 func (UnimplementedProofServiceServer) GetValidatorProof(context.Context, *ValidatorProofRequest) (*ValidatorProofResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetValidatorProof not implemented")
-}
-func (UnimplementedProofServiceServer) GetWithdrawalProof(context.Context, *WithdrawalProofRequest) (*WithdrawalProofResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetWithdrawalProof not implemented")
 }
 func (UnimplementedProofServiceServer) mustEmbedUnimplementedProofServiceServer() {}
 func (UnimplementedProofServiceServer) testEmbeddedByValue()                      {}
@@ -120,24 +104,6 @@ func _ProofService_GetValidatorProof_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ProofService_GetWithdrawalProof_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(WithdrawalProofRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ProofServiceServer).GetWithdrawalProof(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ProofService_GetWithdrawalProof_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ProofServiceServer).GetWithdrawalProof(ctx, req.(*WithdrawalProofRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // ProofService_ServiceDesc is the grpc.ServiceDesc for ProofService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -148,10 +114,6 @@ var ProofService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetValidatorProof",
 			Handler:    _ProofService_GetValidatorProof_Handler,
-		},
-		{
-			MethodName: "GetWithdrawalProof",
-			Handler:    _ProofService_GetWithdrawalProof_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
