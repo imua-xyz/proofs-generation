@@ -158,3 +158,23 @@ func GetPendingPartialWithdrawalsLimit(spec map[string]any) (int, error) {
 func GetPendingConsolidationsLimit(spec map[string]any) (int, error) {
 	return GetValueFromKey[int](spec, "PENDING_CONSOLIDATIONS_LIMIT")
 }
+
+// GetProposerLookaheadSize returns the size of the proposer lookahead vector.
+// This is (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH, which is typically (1 + 1) * 32 = 64
+// Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/fulu/beacon-chain.md#beaconstate
+// The proposer_lookahead field was introduced in Fulu (EIP-7917)
+func GetProposerLookaheadSize(spec map[string]any) (int, error) {
+	// MIN_SEED_LOOKAHEAD is defined in the phase0 configuration
+	// Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#configuration
+	minSeedLookahead, err := GetValueFromKey[uint64](spec, "MIN_SEED_LOOKAHEAD")
+	if err != nil {
+		return 0, err
+	}
+	// SLOTS_PER_EPOCH is defined in the phase0 configuration
+	// Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#time-parameters
+	slotsPerEpoch, err := GetValueFromKey[uint64](spec, "SLOTS_PER_EPOCH")
+	if err != nil {
+		return 0, err
+	}
+	return int((minSeedLookahead + 1) * slotsPerEpoch), nil
+}
