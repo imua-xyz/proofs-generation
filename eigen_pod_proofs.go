@@ -106,7 +106,11 @@ func (epp *EigenPodProofs) ComputeVersionedBeaconStateTopLevelRoots(beaconState 
 	case spec.DataVersionDeneb:
 		return beacon.ComputeBeaconStateTopLevelRootsDeneb(beaconState.Deneb, epp.networkSpec, epp.dynSSZ)
 	case spec.DataVersionCapella:
+		// Capella has the same 28 fields as Deneb
 		return beacon.ComputeBeaconStateTopLevelRootsCapella(beaconState.Capella, epp.networkSpec)
+	case spec.DataVersionFulu:
+		// Fulu has 38 fields (adds proposer_lookahead compared to Electra's 37)
+		return beacon.ComputeBeaconStateTopLevelRootsFulu(beaconState.Fulu, epp.networkSpec, epp.dynSSZ)
 	default:
 		return nil, errors.New("unsupported beacon state version")
 	}
